@@ -637,7 +637,7 @@ if st.session_state.step == "login":
         }
 
         div.stButton > button {
-            width: 280px !important;   /* MEME LARGEUR POUR TOUS */
+            width: 400px !important;   /* MEME LARGEUR POUR TOUS */
             border-radius: 10px !important;
             height: 50px !important;   /* MEME HAUTEUR POUR TOUS */
             font-weight: bold !important;
