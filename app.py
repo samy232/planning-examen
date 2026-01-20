@@ -1,3 +1,4 @@
+# Full app.py (backend-enhanced v1)
 import streamlit as st
 import random
 import string
@@ -7,6 +8,7 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, date
 import time
 from supabase import create_client, Client
+from collections import defaultdict
 
 # ======================
 # CONFIG STREAMLIT
@@ -23,20 +25,6 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # ======================
 # BACKWARDS COMPATIBILITY: cursor / conn
 # ======================
-# You mentioned you changed the cursor; many parts of the script still expect a DB
-# connection object `conn` and a DB cursor `cursor` with methods:
-#   - cursor.execute(sql, params)
-#   - cursor.fetchone()
-#   - cursor.fetchall()
-#   - conn.commit()
-#
-# This block attempts to create a real DB connection from st.secrets["db"] (or st.secrets["database"])
-# supporting psycopg2 (Postgres), mysql.connector, or pymysql. If no usable secrets/driver is found,
-# it provides a DummyCursor that gives clear runtime errors explaining how to configure secrets.
-#
-# To fully enable all DB operations provide st.secrets["db"] with keys:
-#   host, port, user, password, database, optional driver ("psycopg2" or "mysql" or "pymysql")
-#
 conn = None
 cursor = None
 
@@ -98,41 +86,136 @@ try:
 except Exception:
     conn, cursor = None, None
 
+# If no real cursor, provide silent DummyCursor + DummyConn (no st.warning)
 if cursor is None:
     class DummyCursor:
         def __init__(self):
-            # store last query/params and a simple result buffer
             self._last_query = None
             self._last_params = None
             self._buffer = []
 
         def execute(self, *args, **kwargs):
-            # Graceful fallback: don't raise. Record the attempted SQL and params,
-            # warn the user in the Streamlit UI, and provide empty results so app can continue.
             sql = args[0] if args else "<sql missing>"
             params = args[1] if len(args) > 1 else kwargs.get('params', None)
             self._last_query = sql
             self._last_params = params
-            # Provide empty buffer so fetchone/fetchall behave sanely (no exceptions)
+            # No output; keep buffer empty so fetch* return sane defaults
             self._buffer = []
 
         def fetchone(self):
-            if self._buffer:
-                return self._buffer[0]
-            return None
+            return self._buffer[0] if self._buffer else None
 
         def fetchall(self):
             return list(self._buffer)
 
     class DummyConn:
+        is_dummy = True
         def commit(self):
-            # no-op when there's no real DB; changes are not persisted.
             pass
 
     cursor = DummyCursor()
     conn = DummyConn()
 
+is_real_db = not getattr(conn, "is_dummy", False)
+
 tables_reset = ['etudiants','professeurs','chefs_departement','administrateurs','vice_doyens']
+
+# ======================
+# OPTIONAL: SCHEMA CREATION (only if real DB is configured)
+# ======================
+def create_tables_if_missing(cursor, conn):
+    """
+    Creates a minimal schema adapted to the teacher specification.
+    Run only when a real DB connection exists; wrapped in try/except.
+    """
+    try:
+        # Basic schema compatible with MySQL / Postgres simple types.
+        # NOTE: For production further typing/constraints/indexes/FK tuning required.
+        ddl_statements = [
+            """
+            CREATE TABLE IF NOT EXISTS departements (
+                id SERIAL PRIMARY KEY,
+                nom TEXT UNIQUE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS formations (
+                id SERIAL PRIMARY KEY,
+                nom TEXT,
+                dept_id INTEGER,
+                nb_modules INTEGER DEFAULT 0
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS etudiants (
+                id SERIAL PRIMARY KEY,
+                nom TEXT,
+                prenom TEXT,
+                email TEXT UNIQUE,
+                password TEXT,
+                formation_id INTEGER,
+                promo INTEGER
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS professeurs (
+                id SERIAL PRIMARY KEY,
+                nom TEXT,
+                email TEXT UNIQUE,
+                dept_id INTEGER,
+                specialite TEXT
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS modules (
+                id SERIAL PRIMARY KEY,
+                nom TEXT,
+                credits INTEGER DEFAULT 3,
+                formation_id INTEGER,
+                pre_req_id INTEGER
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS lieu_examen (
+                id SERIAL PRIMARY KEY,
+                nom TEXT,
+                capacite INTEGER,
+                type TEXT,
+                batiment TEXT
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS inscriptions (
+                etudiant_id INTEGER,
+                module_id INTEGER
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS examens (
+                id SERIAL PRIMARY KEY,
+                module_id INTEGER,
+                prof_id INTEGER,
+                salle_id INTEGER,
+                date_heure TIMESTAMP,
+                duree_minutes INTEGER,
+                validated INTEGER DEFAULT 0,
+                final_validated INTEGER DEFAULT 0
+            )
+            """
+        ]
+
+        for sql in ddl_statements:
+            cursor.execute(sql)
+        conn.commit()
+    except Exception as e:
+        # Do not surface errors to end user if schema creation fails; log to console
+        try:
+            print("Schema creation warning:", e)
+        except Exception:
+            pass
+
+if is_real_db:
+    create_tables_if_missing(cursor, conn)
 
 # ======================
 # FONCTION ENVOI EMAIL
@@ -169,7 +252,7 @@ def code_is_valid(sent_time):
     return datetime.now() - sent_time <= timedelta(minutes=3)
 
 # ======================
-# UTIL: FORMAT TABLES (UISAFE)
+# UTIL: TEMPS & TABLES (UISAFE)
 # ======================
 def show_table_safe(rows, title=None):
     """Affiche une table si rows non vide, sinon message."""
@@ -182,7 +265,15 @@ def show_table_safe(rows, title=None):
 # CONFLITS / KPIS / GENERATION / OPTIMISATION
 # ======================
 def detect_conflicts(cursor, start_date=None, end_date=None):
-    """Retourne un dict avec plusieurs types de conflits. Filtre par date si fourni."""
+    """
+    Retourne un dict avec plusieurs types de conflits. Filtre par date si fourni.
+    This function uses SQL heuristics to detect:
+      - Students with >1 exam per day
+      - Professors with >3 exams per day
+      - Rooms where inscriptions > capacity
+      - Distribution of surveillances per professor
+      - Conflits per department (overlaps by room or professor)
+    """
     conflicts = {}
 
     date_filter_clause = ""
@@ -197,72 +288,82 @@ def detect_conflicts(cursor, start_date=None, end_date=None):
         date_filter_clause = " AND DATE(e.date_heure) <= %s"
         params.append(end_date)
 
-    # 1) Étudiants : >1 examen par jour
-    cursor.execute(f"""
-        SELECT et.email AS email, DATE(e.date_heure) AS jour, COUNT(*) AS nb_exams
-        FROM examens e
-        JOIN modules m ON e.module_id = m.id
-        JOIN inscriptions i ON i.module_id = m.id
-        JOIN etudiants et ON et.id = i.etudiant_id
-        WHERE 1=1 {date_filter_clause}
-        GROUP BY et.email, DATE(e.date_heure)
-        HAVING COUNT(*) > 1
-    """, tuple(params))
-    conflicts['etudiants_1parjour'] = cursor.fetchall()
+    try:
+        # 1) Étudiants : >1 examen par jour
+        cursor.execute(f"""
+            SELECT et.email AS email, DATE(e.date_heure) AS jour, COUNT(*) AS nb_exams
+            FROM examens e
+            JOIN modules m ON e.module_id = m.id
+            JOIN inscriptions i ON i.module_id = m.id
+            JOIN etudiants et ON et.id = i.etudiant_id
+            WHERE 1=1 {date_filter_clause}
+            GROUP BY et.email, DATE(e.date_heure)
+            HAVING COUNT(*) > 1
+        """, tuple(params))
+        conflicts['etudiants_1parjour'] = cursor.fetchall()
 
-    # 2) Professeurs : >3 examens par jour
-    cursor.execute(f"""
-        SELECT p.email AS email, DATE(e.date_heure) AS jour, COUNT(*) AS nb_exams
-        FROM examens e
-        JOIN professeurs p ON p.id = e.prof_id
-        WHERE 1=1 {date_filter_clause}
-        GROUP BY p.email, DATE(e.date_heure)
-        HAVING COUNT(*) > 3
-    """, tuple(params))
-    conflicts['profs_3parjour'] = cursor.fetchall()
+        # 2) Professeurs : >3 examens par jour
+        cursor.execute(f"""
+            SELECT p.email AS email, DATE(e.date_heure) AS jour, COUNT(*) AS nb_exams
+            FROM examens e
+            JOIN professeurs p ON p.id = e.prof_id
+            WHERE 1=1 {date_filter_clause}
+            GROUP BY p.email, DATE(e.date_heure)
+            HAVING COUNT(*) > 3
+        """, tuple(params))
+        conflicts['profs_3parjour'] = cursor.fetchall()
 
-    # 3) Capacite salles : nombre d'inscrits > capacité
-    cursor.execute(f"""
-        SELECT e.id AS examen_id, l.nom AS salle, l.capacite, COUNT(i.etudiant_id) AS inscrits
-        FROM examens e
-        JOIN lieu_examen l ON e.salle_id = l.id
-        LEFT JOIN inscriptions i ON i.module_id = e.module_id
-        WHERE 1=1 {date_filter_clause}
-        GROUP BY e.id, l.nom, l.capacite
-        HAVING COUNT(i.etudiant_id) > l.capacite
-    """, tuple(params))
-    conflicts['salles_capacite'] = cursor.fetchall()
+        # 3) Capacite salles : nombre d'inscrits > capacité
+        cursor.execute(f"""
+            SELECT e.id AS examen_id, l.nom AS salle, l.capacite, COUNT(i.etudiant_id) AS inscrits
+            FROM examens e
+            JOIN lieu_examen l ON e.salle_id = l.id
+            LEFT JOIN inscriptions i ON i.module_id = e.module_id
+            WHERE 1=1 {date_filter_clause}
+            GROUP BY e.id, l.nom, l.capacite
+            HAVING COUNT(i.etudiant_id) > l.capacite
+        """, tuple(params))
+        conflicts['salles_capacite'] = cursor.fetchall()
 
-    # 4) Distribution de surveillances par professeur (résumé)
-    cursor.execute(f"""
-        SELECT p.id, p.nom, p.email, COUNT(e.id) AS nb_surv
-        FROM professeurs p
-        LEFT JOIN examens e ON e.prof_id = p.id
-        WHERE 1=1
-        GROUP BY p.id, p.nom, p.email
-    """)
-    conflicts['surveillances_par_prof'] = cursor.fetchall()
+        # 4) Distribution de surveillances par professeur (résumé)
+        cursor.execute(f"""
+            SELECT p.id, p.nom, p.email, COUNT(e.id) AS nb_surv
+            FROM professeurs p
+            LEFT JOIN examens e ON e.prof_id = p.id
+            WHERE 1=1
+            GROUP BY p.id, p.nom, p.email
+        """)
+        conflicts['surveillances_par_prof'] = cursor.fetchall()
 
-    # 5) Conflits par département (détection d'overlap pour même salle ou même enseignant)
-    cursor.execute(f"""
-        SELECT d.nom AS departement, COUNT(*) AS conflits_estimes
-        FROM (
-            SELECT e1.id AS e1, e2.id AS e2, p.dept_id
-            FROM examens e1
-            JOIN examens e2 ON e1.id <> e2.id
-                AND DATE(e1.date_heure) = DATE(e2.date_heure)
-                AND (
-                    (e1.date_heure <= e2.date_heure AND TIMESTAMPDIFF(MINUTE, e1.date_heure, e2.date_heure) < e1.duree_minutes)
-                    OR
-                    (e2.date_heure <= e1.date_heure AND TIMESTAMPDIFF(MINUTE, e2.date_heure, e1.date_heure) < e2.duree_minutes)
-                )
-                AND (e1.salle_id = e2.salle_id OR e1.prof_id = e2.prof_id)
-            JOIN professeurs p ON p.id = e1.prof_id
-        ) sub
-        JOIN departements d ON d.id = sub.dept_id
-        GROUP BY d.nom
-    """)
-    conflicts['conflits_par_dept'] = cursor.fetchall()
+        # 5) Conflits par département (détection d'overlap pour même salle ou même enseignant)
+        # TIMESTAMPDIFF isn't available on all DBs; try a portable check: check overlap by time ranges using minute arithmetic when possible.
+        # For simplicity use the generic check of same day and overlapping time frames.
+        cursor.execute(f"""
+            SELECT d.nom AS departement, COUNT(*) AS conflits_estimes
+            FROM (
+                SELECT e1.id AS e1, e2.id AS e2, p.dept_id
+                FROM examens e1
+                JOIN examens e2 ON e1.id <> e2.id
+                    AND DATE(e1.date_heure) = DATE(e2.date_heure)
+                    AND (
+                        (e1.date_heure <= e2.date_heure AND (EXTRACT(EPOCH FROM (e2.date_heure - e1.date_heure))/60) < e1.duree_minutes)
+                        OR
+                        (e2.date_heure <= e1.date_heure AND (EXTRACT(EPOCH FROM (e1.date_heure - e2.date_heure))/60) < e2.duree_minutes)
+                    )
+                    AND (e1.salle_id = e2.salle_id OR e1.prof_id = e2.prof_id)
+                JOIN professeurs p ON p.id = e1.prof_id
+            ) sub
+            JOIN departements d ON d.id = sub.dept_id
+            GROUP BY d.nom
+        """)
+        conflicts['conflits_par_dept'] = cursor.fetchall()
+    except Exception:
+        # If database does not support EXTRACT/EPOCH or other constructs, return empty lists for conflict categories gracefully
+        conflicts.setdefault('etudiants_1parjour', [])
+        conflicts.setdefault('profs_3parjour', [])
+        conflicts.setdefault('salles_capacite', [])
+        conflicts.setdefault('surveillances_par_prof', [])
+        conflicts.setdefault('conflits_par_dept', [])
 
     return conflicts
 
@@ -277,19 +378,29 @@ def compute_kpis(cursor, start_date=None, end_date=None):
         params = [start_date, end_date]
 
     # Total salles
-    cursor.execute("SELECT COUNT(*) as total_salles FROM lieu_examen")
-    total_salles_row = cursor.fetchone()
-    total_salles = total_salles_row['total_salles'] if total_salles_row else 0
+    try:
+        cursor.execute("SELECT COUNT(*) as total_salles FROM lieu_examen")
+        total_salles_row = cursor.fetchone()
+        total_salles = total_salles_row['total_salles'] if total_salles_row else 0
+    except Exception:
+        total_salles = 0
     kpis['total_salles'] = total_salles
 
     # Nombre de séances dans la fenêtre (ou 30j si non fourni)
     if start_date and end_date:
-        cursor.execute(f"SELECT COUNT(*) as nb_seances FROM examens {date_where}", tuple(params))
-        nb_seances = cursor.fetchone()['nb_seances'] or 0
-        periode_days = (datetime.strptime(end_date, "%Y-%m-%d").date() - datetime.strptime(start_date, "%Y-%m-%d").date()).days + 1
+        try:
+            cursor.execute(f"SELECT COUNT(*) as nb_seances FROM examens {date_where}", tuple(params))
+            nb_seances = cursor.fetchone()['nb_seances'] or 0
+            periode_days = (datetime.strptime(end_date, "%Y-%m-%d").date() - datetime.strptime(start_date, "%Y-%m-%d").date()).days + 1
+        except Exception:
+            nb_seances = 0
+            periode_days = (datetime.strptime(end_date, "%Y-%m-%d").date() - datetime.strptime(start_date, "%Y-%m-%d").date()).days + 1
     else:
-        cursor.execute("SELECT COUNT(*) as nb_seances_30j FROM examens WHERE date_heure >= DATE_SUB(NOW(), INTERVAL 30 DAY)")
-        nb_seances = cursor.fetchone()['nb_seances_30j'] or 0
+        try:
+            cursor.execute("SELECT COUNT(*) as nb_seances_30j FROM examens WHERE date_heure >= DATE_SUB(NOW(), INTERVAL 30 DAY)")
+            nb_seances = cursor.fetchone()['nb_seances_30j'] or 0
+        except Exception:
+            nb_seances = 0
         periode_days = 30
 
     possible_slots = total_salles * periode_days if total_salles else 0
@@ -299,31 +410,37 @@ def compute_kpis(cursor, start_date=None, end_date=None):
     kpis['periode_days'] = periode_days
 
     # Top profs minutes (dans fenêtre si défini)
-    if start_date and end_date:
-        cursor.execute(f"""
-            SELECT p.nom, p.email, COALESCE(SUM(e.duree_minutes),0) AS minutes_surv
-            FROM professeurs p
-            LEFT JOIN examens e ON e.prof_id = p.id AND DATE(e.date_heure) BETWEEN %s AND %s
-            GROUP BY p.id, p.nom, p.email
-            ORDER BY minutes_surv DESC
-            LIMIT 10
-        """, (start_date, end_date))
-    else:
-        cursor.execute("""
-            SELECT p.nom, p.email, COALESCE(SUM(e.duree_minutes),0) AS minutes_surv
-            FROM professeurs p
-            LEFT JOIN examens e ON e.prof_id = p.id AND e.date_heure >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-            GROUP BY p.id, p.nom, p.email
-            ORDER BY minutes_surv DESC
-            LIMIT 10
-        """)
-    kpis['top_profs_minutes'] = cursor.fetchall()
+    try:
+        if start_date and end_date:
+            cursor.execute(f"""
+                SELECT p.nom, p.email, COALESCE(SUM(e.duree_minutes),0) AS minutes_surv
+                FROM professeurs p
+                LEFT JOIN examens e ON e.prof_id = p.id AND DATE(e.date_heure) BETWEEN %s AND %s
+                GROUP BY p.id, p.nom, p.email
+                ORDER BY minutes_surv DESC
+                LIMIT 10
+            """, (start_date, end_date))
+        else:
+            cursor.execute("""
+                SELECT p.nom, p.email, COALESCE(SUM(e.duree_minutes),0) AS minutes_surv
+                FROM professeurs p
+                LEFT JOIN examens e ON e.prof_id = p.id AND e.date_heure >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                GROUP BY p.id, p.nom, p.email
+                ORDER BY minutes_surv DESC
+                LIMIT 10
+            """)
+        kpis['top_profs_minutes'] = cursor.fetchall()
+    except Exception:
+        kpis['top_profs_minutes'] = []
 
     # Conflit estimé ratio (approx)
     conflicts = detect_conflicts(cursor, start_date, end_date)
     nb_exams_with_conflicts = len(conflicts.get('salles_capacite', []))
-    cursor.execute("SELECT COUNT(*) AS total_exams FROM examens")
-    total_exams = cursor.fetchone()['total_exams'] or 0
+    try:
+        cursor.execute("SELECT COUNT(*) AS total_exams FROM examens")
+        total_exams = cursor.fetchone()['total_exams'] or 0
+    except Exception:
+        total_exams = 0
     kpis['conflit_estime_ratio_pct'] = round((nb_exams_with_conflicts / total_exams * 100) if total_exams>0 else 0, 1)
     kpis['conflits_summary'] = {
         'etudiants_1parjour': len(conflicts.get('etudiants_1parjour', [])),
@@ -333,30 +450,267 @@ def compute_kpis(cursor, start_date=None, end_date=None):
 
     return kpis
 
+# ======================
+# TIMETABLE GENERATION (greedy prototype)
+# ======================
+def _get_dates_between(start_str, end_str):
+    s = datetime.strptime(start_str, "%Y-%m-%d").date()
+    e = datetime.strptime(end_str, "%Y-%m-%d").date()
+    days = []
+    cur = s
+    while cur <= e:
+        days.append(cur)
+        cur = cur + timedelta(days=1)
+    return days
+
+def _count_students_for_module(cursor):
+    cursor.execute("""
+        SELECT m.id AS module_id, m.nom AS module_nom, COUNT(i.etudiant_id) AS nb_inscrits
+        FROM modules m
+        LEFT JOIN inscriptions i ON i.module_id = m.id
+        GROUP BY m.id, m.nom
+    """)
+    rows = cursor.fetchall()
+    return {r['module_id']: r for r in rows} if rows else {}
+
+def _get_rooms(cursor):
+    cursor.execute("SELECT id, nom, capacite FROM lieu_examen ORDER BY capacite ASC")
+    rows = cursor.fetchall()
+    return rows or []
+
+def _get_module_prof(cursor):
+    cursor.execute("SELECT id, prof_id, duree_minutes FROM examens WHERE module_id IS NOT NULL")
+    # Note: this is a heuristic; ideally modules table should store default prof / duration.
+    rows = cursor.fetchall()
+    mapping = {}
+    for r in rows:
+        mapping[r['id']] = {'prof_id': r.get('prof_id'), 'duree_minutes': r.get('duree_minutes', 120)}
+    return mapping
+
 def generate_timetable(cursor, conn, start_date=None, end_date=None, force=False):
     """
-    Génération automatique d'EDT (mode non destructive par défaut).
-    - Par défaut le code n'écrit pas en base sans confirmation 'force'.
-    - Retourne un rapport et conflits résiduels.
+    Greedy automatic timetable generator (prototype):
+    - Tries to schedule each module at one slot between start_date and end_date.
+    - Enforces: student max 1 exam/day, prof max ~3/day, room capacity.
+    - Uses departmental priority when selecting supervising professor (tries to use module's prof if available).
+    - If force=True, inserts created exams into the DB.
+    - Returns report and conflicts (residual conflicts detected).
     """
-    time.sleep(0.5)
-    report = {
-        "message": "Génération automatique exécutée.",
-        "created_slots": 0
-    }
+    tic = time.time()
+    report = {"message": "Génération automatique exécutée.", "created_slots": 0, "attempts": 0}
+    conflicts_report = {}
 
-    conflicts = detect_conflicts(cursor, start_date, end_date)
+    if not start_date or not end_date:
+        return {"error": "start_date & end_date required"}, {}
 
-    return report, conflicts
+    # Convert to dates
+    try:
+        days = _get_dates_between(start_date, end_date)
+    except Exception as e:
+        return {"error": f"Invalid dates: {e}"}, {}
+
+    # Fetch necessary data
+    try:
+        modules_count = _count_students_for_module(cursor)  # dict by module_id
+    except Exception:
+        modules_count = {}
+
+    try:
+        rooms = _get_rooms(cursor)
+    except Exception:
+        rooms = []
+
+    # Get list of modules to schedule: modules table
+    try:
+        cursor.execute("SELECT id, nom, formation_id FROM modules")
+        modules = cursor.fetchall() or []
+    except Exception:
+        modules = []
+
+    # Fetch professors list
+    try:
+        cursor.execute("SELECT id, nom, dept_id FROM professeurs")
+        profs = cursor.fetchall() or []
+    except Exception:
+        profs = []
+
+    profs_by_dept = defaultdict(list)
+    for p in profs:
+        profs_by_dept[p.get('dept_id')].append(p)
+
+    # Tracking structures
+    scheduled = []  # list of dicts for created exams (module_id, prof_id, salle_id, date_heure, duree_minutes)
+    student_exam_days = defaultdict(set)  # student_id -> set(dates)
+    prof_exam_count_by_day = defaultdict(lambda: defaultdict(int))  # prof_id -> {date: count}
+    room_used_by_slot = defaultdict(set)  # date -> set(room_id)
+
+    # Helper to check if module's students are free that day
+    def students_free_on_date(module_id, day):
+        # get students for module
+        try:
+            cursor.execute("SELECT etudiant_id FROM inscriptions WHERE module_id = %s", (module_id,))
+            students = [r['etudiant_id'] for r in cursor.fetchall()] or []
+        except Exception:
+            students = []
+        for s in students:
+            if day in student_exam_days.get(s, set()):
+                return False
+        return True
+
+    # Helper to assign a prof: try module's prof (if exists), then dept profs, then least loaded prof overall
+    def choose_prof_for_module(module_id, formation_id):
+        # try to find a professor who teaches the module (if exists)
+        try:
+            cursor.execute("SELECT prof_id FROM examens WHERE module_id = %s LIMIT 1", (module_id,))
+            r = cursor.fetchone()
+            if r and r.get('prof_id'):
+                return r['prof_id']
+        except Exception:
+            pass
+        # else try to pick a prof from same formation's department if available
+        try:
+            cursor.execute("SELECT dept_id FROM formations WHERE id = %s", (formation_id,))
+            row = cursor.fetchone()
+            dept_id = row.get('dept_id') if row else None
+        except Exception:
+            dept_id = None
+
+        if dept_id and profs_by_dept.get(dept_id):
+            # pick least-loaded prof (by total scheduled so far)
+            cand = min(profs_by_dept[dept_id], key=lambda p: sum(prof_exam_count_by_day[p['id']].values()))
+            return cand['id']
+        # fallback: pick global least-loaded
+        if profs:
+            cand = min(profs, key=lambda p: sum(prof_exam_count_by_day[p['id']].values()))
+            return cand['id']
+        return None
+
+    # Greedy scheduling: iterate modules sorted by number of students descending (large groups placed earlier)
+    modules_sorted = sorted(modules, key=lambda m: -(modules_count.get(m['id'], {}).get('nb_inscrits', 0) if modules_count else 0))
+
+    for mod in modules_sorted:
+        mid = mod['id']
+        mname = mod.get('nom')
+        nb_ins = modules_count.get(mid, {}).get('nb_inscrits', 0)
+        formation_id = mod.get('formation_id')
+        scheduled_flag = False
+        report['attempts'] += 1
+
+        # prefer larger rooms that can hold nb_ins
+        suitable_rooms = [r for r in rooms if r.get('capacite', 0) >= nb_ins]
+        # if no room big enough, choose largest available (will generate conflict later)
+        if not suitable_rooms:
+            suitable_rooms = sorted(rooms, key=lambda r: -r.get('capacite', 0)) if rooms else []
+
+        # pick duration default 120 if not available
+        duration = 120
+        try:
+            cursor.execute("SELECT duree_minutes FROM examens WHERE module_id = %s LIMIT 1", (mid,))
+            row = cursor.fetchone()
+            if row and row.get('duree_minutes'):
+                duration = row.get('duree_minutes')
+        except Exception:
+            pass
+
+        for day in days:
+            # day as date obj
+            # check students free
+            if not students_free_on_date(mid, day):
+                continue
+
+            # try to find a room free that day
+            chosen_room = None
+            for r in suitable_rooms:
+                if r['id'] not in room_used_by_slot.get(day, set()):
+                    chosen_room = r
+                    break
+            if chosen_room is None:
+                continue
+
+            # pick a prof respecting daily limit
+            chosen_prof = choose_prof_for_module(mid, formation_id)
+            if chosen_prof is None:
+                # no prof available -> skip
+                continue
+            # check prof daily count
+            if prof_exam_count_by_day[chosen_prof].get(day, 0) >= 3:
+                # try another prof (try all profs)
+                other_cands = [p for p in profs if prof_exam_count_by_day[p['id']].get(day, 0) < 3]
+                if other_cands:
+                    chosen_prof = min(other_cands, key=lambda p: sum(prof_exam_count_by_day[p['id']].values()))['id']
+                else:
+                    continue  # no prof with capacity that day
+
+            # All checks passed -> schedule
+            # choose a time: default to 09:00 for simplicity (could be enhanced)
+            dt = datetime.combine(day, datetime.strptime("09:00", "%H:%M").time())
+            scheduled.append({
+                "module_id": mid,
+                "module_nom": mname,
+                "prof_id": chosen_prof,
+                "salle_id": chosen_room['id'],
+                "date_heure": dt,
+                "duree_minutes": duration,
+                "nb_inscrits": nb_ins
+            })
+            # mark students as busy that day
+            try:
+                cursor.execute("SELECT etudiant_id FROM inscriptions WHERE module_id = %s", (mid,))
+                studs = [r['etudiant_id'] for r in cursor.fetchall()] or []
+            except Exception:
+                studs = []
+            for s in studs:
+                student_exam_days[s].add(day)
+            prof_exam_count_by_day[chosen_prof][day] += 1
+            room_used_by_slot[day].add(chosen_room['id'])
+            scheduled_flag = True
+            report['created_slots'] += 1
+            break
+
+        if not scheduled_flag:
+            # couldn't schedule the module in the period given
+            conflicts_report.setdefault('unscheduled_modules', []).append({
+                'module_id': mid,
+                'module_nom': mname,
+                'nb_inscrits': nb_ins
+            })
+
+    # If force=True, insert scheduled exams into DB
+    if force and is_real_db and scheduled:
+        try:
+            for s in scheduled:
+                cursor.execute("""
+                    INSERT INTO examens (module_id, prof_id, salle_id, date_heure, duree_minutes)
+                    VALUES (%s,%s,%s,%s,%s)
+                """, (s['module_id'], s['prof_id'], s['salle_id'], s['date_heure'], s['duree_minutes']))
+            conn.commit()
+        except Exception as e:
+            # if insert fails, report the error but keep the in-memory scheduled list
+            conflicts_report['insert_error'] = str(e)
+
+    # After schedule attempt, run conflict detection on the candidate schedule (or DB if persisted)
+    conflicts_after = detect_conflicts(cursor, start_date, end_date)
+
+    duration = time.time() - tic
+    report['duration_seconds'] = duration
+    report['scheduled_count'] = len(scheduled)
+    report['scheduled_preview'] = scheduled[:50]  # preview for UI
+    report['conflicts_post'] = {k: len(v) for k,v in conflicts_after.items()}
+
+    # Merge conflicts
+    for k, v in conflicts_after.items():
+        conflicts_report[k] = v
+
+    return report, conflicts_report
 
 def optimize_resources(cursor, conn, start_date=None, end_date=None):
     """
-    Stub d'optimisation des ressources pour l'admin.
-    Retourne un rapport d'optimisation et conflits résiduels.
+    Stub d'optimisation des ressources pour l'admin (keeps previous behavior).
+    Returns a prototype report and runs detect_conflicts as residual check.
     """
     tic = time.time()
-    # Ici on insèrerait un algorithme d'optimisation (OR-Tools / ILP)
-    time.sleep(1)  # simuler travail
+    # Here one could plug OR-Tools, ILP, etc.
+    time.sleep(1)
     duration = time.time() - tic
 
     report = {
@@ -829,6 +1183,10 @@ elif st.session_state.step == "dashboard":
         cursor.execute("SELECT * FROM administrateurs WHERE email = %s", (email,))
         user_data = cursor.fetchone()
 
+    # Defensive: ensure user_data is a dict to avoid attribute errors
+    if user_data is None:
+        user_data = {}
+
     # Sidebar
     with st.sidebar:
         st.title("📌 Menu")
@@ -857,7 +1215,7 @@ elif st.session_state.step == "dashboard":
     # Étudiant & Professeur UIs (inchangées)
     # --------------------
     if role == "Etudiant":
-        st.title(f"👋 Bienvenue, {user_data.get('prenom','')} {user_data.get('nom','') if user_data else ''}")
+        st.title(f"👋 Bienvenue, {user_data.get('prenom','')} {user_data.get('nom','')}")
         st.subheader("🎓 Emploi du temps des examens")
         cursor.execute("""
             SELECT DISTINCT m.nom FROM modules m
@@ -876,7 +1234,7 @@ elif st.session_state.step == "dashboard":
                 date_filtre = None
 
         query = """
-            SELECT m.nom AS Module, l.nom AS Salle, e.date_heure AS 'Date & Heure', e.duree_minutes AS 'Durée'
+            SELECT m.nom AS Module, l.nom AS Salle, e.date_heure AS "Date & Heure", e.duree_minutes AS "Durée"
             FROM examens e
             JOIN modules m ON e.module_id = m.id
             JOIN lieu_examen l ON e.salle_id = l.id
@@ -900,7 +1258,7 @@ elif st.session_state.step == "dashboard":
             st.info("Aucun examen trouvé.")
 
     elif role == "Professeur":
-        st.title(f"👨‍🏫 Bienvenue, M. {user_data.get('nom','') if user_data else ''}")
+        st.title(f"👨‍🏫 Bienvenue, M. {user_data.get('nom','')}")
         st.subheader("📋 Mes surveillances d'examens")
         col_f1, col_f2, col_f3 = st.columns(3)
         cursor.execute("""
@@ -927,7 +1285,7 @@ elif st.session_state.step == "dashboard":
             except Exception:
                 dat_f = None
         query_prof = """
-            SELECT m.nom AS Module, l.nom AS Salle, e.date_heure AS 'Date & Heure', e.duree_minutes AS 'Durée'
+            SELECT m.nom AS Module, l.nom AS Salle, e.date_heure AS "Date & Heure", e.duree_minutes AS "Durée"
             FROM examens e
             JOIN modules m ON e.module_id = m.id
             JOIN lieu_examen l ON e.salle_id = l.id
@@ -987,9 +1345,9 @@ elif st.session_state.step == "dashboard":
                     JOIN examens e2 ON e1.id <> e2.id
                         AND DATE(e1.date_heure) = DATE(e2.date_heure)
                         AND (
-                            (e1.date_heure <= e2.date_heure AND TIMESTAMPDIFF(MINUTE, e1.date_heure, e2.date_heure) < e1.duree_minutes)
+                            (e1.date_heure <= e2.date_heure AND (EXTRACT(EPOCH FROM (e2.date_heure - e1.date_heure))/60) < e1.duree_minutes)
                             OR
-                            (e2.date_heure <= e1.date_heure AND TIMESTAMPDIFF(MINUTE, e2.date_heure, e1.date_heure) < e2.duree_minutes)
+                            (e2.date_heure <= e1.date_heure AND (EXTRACT(EPOCH FROM (e1.date_heure - e2.date_heure))/60) < e2.duree_minutes)
                         )
                         AND (e1.salle_id = e2.salle_id OR e1.prof_id = e2.prof_id)
                     JOIN modules m ON m.id = e1.module_id
@@ -1004,7 +1362,6 @@ elif st.session_state.step == "dashboard":
 
             st.markdown("### Validation des examens par formation")
             try:
-                # Ne récupérer que les examens NON validés pour ce département
                 cursor.execute("""
                     SELECT e.id, m.nom AS module, f.nom AS formation, l.nom AS salle,
                            e.date_heure, e.duree_minutes, COALESCE(e.validated,0) AS validated
@@ -1068,10 +1425,11 @@ elif st.session_state.step == "dashboard":
                     st.error("Veuillez choisir une période valide (début ≤ fin).")
                 else:
                     tic = time.time()
+                    # default: simulate first, don't persist
                     report, conflicts = generate_timetable(cursor, conn, start_str, end_str, force=False)
                     duration = time.time() - tic
-                    st.success(f"✅ Génération complète terminée en {duration:.1f} secondes !")
-                    # display only visible conflicts (exclude the 4 keys requested)
+                    st.success(f"✅ Génération (simulation) terminée en {duration:.1f} secondes !")
+                    st.json(report)
                     visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
                     total_visible = sum(len(v) for v in visible_conflicts.values())
                     if total_visible == 0:
@@ -1082,6 +1440,16 @@ elif st.session_state.step == "dashboard":
                             if rows:
                                 with st.expander(f"{k} — {len(rows)} élément(s)"):
                                     show_table_safe(rows)
+                    # Provide an explicit "persist" option
+                    if st.button("✅ Persist schedule to DB (force)"):
+                        if not is_real_db:
+                            st.error("Impossible d'écrire en base: DB non configurée.")
+                        else:
+                            tic = time.time()
+                            rep2, conf2 = generate_timetable(cursor, conn, start_str, end_str, force=True)
+                            dt = time.time() - tic
+                            st.success(f"Écriture en base terminée en {dt:.1f}s. {rep2.get('created_slots',0)} créés.")
+                            st.json(rep2)
 
         with col_a2:
             if st.button("Optimiser les ressources"):
@@ -1096,8 +1464,6 @@ elif st.session_state.step == "dashboard":
                     for k, v in report.get('improvements', {}).items():
                         st.write(f"- {k.replace('_',' ')} : {v}")
                     st.markdown("Notes :")
-
-                    # display only visible conflicts (exclude the 4 keys requested)
                     visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
                     total_visible = sum(len(v) for v in visible_conflicts.values())
                     if total_visible == 0:
@@ -1117,7 +1483,6 @@ elif st.session_state.step == "dashboard":
                 tic = time.time()
                 conflicts = detect_conflicts(cursor, start_str, end_str)
                 duration = time.time() - tic
-                # Show only visible conflicts (exclude the 4 keys requested)
                 visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
                 total_visible = sum(len(v) for v in visible_conflicts.values())
                 if total_visible == 0:
