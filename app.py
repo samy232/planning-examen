@@ -29,6 +29,7 @@ conn = psycopg2.connect(
     dbname=DB_NAME,
     user=DB_USER,
     password=DB_PASSWORD
+    sslmode="require"
 )
 cursor = conn.cursor(cursor_factory=RealDictCursor)
 
