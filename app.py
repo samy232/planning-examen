@@ -608,38 +608,19 @@ def db_select(table, columns, eq=None):
     return []
 
 
-
-
-
-import streamlit as st
-
-# --- CONFIGURATION INITIALE ---
-if "step" not in st.session_state:
-    st.session_state.step = "login"
-if "user_email" not in st.session_state:
-    st.session_state.user_email = None
-if "role" not in st.session_state:
-    st.session_state.role = None
-
-import streamlit as st
-
-# --- INITIALISATION (À mettre au début du fichier) ---
-if "step" not in st.session_state:
-    st.session_state.step = "login"
-
 # ==================================================
-# PAGE 1 — LOGIN + INSCRIPTION (DESIGN & BACKEND)
+# PAGE 1 — LOGIN + INSCRIPTION
 # ==================================================
 if st.session_state.step == "login":
 
-    # --- STYLE CSS (LE PANNEAU BLEU QUE TU AS AIMÉ) ---
+    # --- CSS : LE DESIGN DU PANNEAU UNIQUE ---
     st.markdown("""
         <style>
         .stApp { background-color: #000000 !important; }
 
-        /* Le Panneau Bleu Unique */
+        /* Ciblage du conteneur pour le transformer en panneau bleu */
         [data-testid="stVerticalBlock"] > div:has(div.blue-panel) {
-            background: linear-gradient(135deg, #1E3A8A 0%, #111827 100%);
+            background: linear-gradient(135deg, #1E3A8A 0%, #111827 100%) !important;
             padding: 45px !important;
             border-radius: 25px !important;
             box-shadow: 0px 10px 40px rgba(0, 133, 255, 0.4) !important;
@@ -677,20 +658,22 @@ if st.session_state.step == "login":
         </style>
     """, unsafe_allow_html=True)
 
-    # --- STRUCTURE VISUELLE ---
+    # --- MISE EN PAGE ---
     _, col_center, _ = st.columns([0.6, 1, 0.6])
 
     with col_center:
-        st.write("#") # Espace
+        st.write("#") 
         
         with st.container():
+            # Marqueur obligatoire pour le style
             st.markdown('<div class="blue-panel"></div>', unsafe_allow_html=True)
             st.markdown('<div class="login-title">Connexion</div>', unsafe_allow_html=True)
 
+            # --- TES INPUTS ---
             email = st.text_input("Email", placeholder="votre@email.com")
             password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
             
-            # --- BACKEND : LOGIQUE DE CONNEXION ---
+            # --- TON BACKEND (EXACTEMENT COMME DEMANDÉ) ---
             if st.button("Se connecter"):
                 roles_tables = {
                     "Etudiant": "etudiants",
@@ -703,7 +686,7 @@ if st.session_state.step == "login":
 
                 found_user = False
                 for role_name, table_name in roles_tables.items():
-                    # Utilisation de db_select (Supabase)
+                    # Utilisation de db_select Supabase
                     users = db_select(table_name, "*", eq={"email": email, "password": password})
                     if users:
                         st.session_state.user_email = email
@@ -718,32 +701,17 @@ if st.session_state.step == "login":
                 else:
                     st.error("Email ou mot de passe incorrect")
 
+            # --- NAVIGATION BAS DE PAGE ---
             st.markdown("<hr style='opacity:0.2'>", unsafe_allow_html=True)
-            
-            # --- BACKEND : NAVIGATION ---
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("Mot de passe oublié ?"):
                     st.session_state.step = "forgot_email"
                     st.rerun()
-            
             with c2:
                 if st.button("Nouvelle inscription"):
                     st.session_state.step = "choose_role"
                     st.rerun()
-
-# --- SQUELETTE DES PAGES SUIVANTES (Pour éviter les erreurs) ---
-elif st.session_state.step == "choose_role":
-    st.markdown("<h2 style='color:white;'>Choisir votre rôle</h2>", unsafe_allow_html=True)
-    if st.button("Retour"):
-        st.session_state.step = "login"
-        st.rerun()
-
-elif st.session_state.step == "forgot_email":
-    st.markdown("<h2 style='color:white;'>Récupération de compte</h2>", unsafe_allow_html=True)
-    if st.button("Retour"):
-        st.session_state.step = "login"
-        st.rerun()
 # ==================================================
 # PAGE 2 — CHOIX DU RÔLE
 # ==================================================
