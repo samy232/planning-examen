@@ -598,7 +598,7 @@ for key, value in defaults.items():
 
 
 # ==================================================
-# PAGE 1 — LOGIN + INSCRIPTION (DESIGN & BACKEND)
+# PAGE 1 — LOGIN + INSCRIPTION (DESIGN CHOISI)
 # ==================================================
 if st.session_state.step == "login":
 
@@ -641,7 +641,7 @@ if st.session_state.step == "login":
             color: white !important;
         }
 
-        /* Bouton Login principal */
+        /* Bouton Login */
         div.stButton > button:first-child {
             background-color: #0085FF !important;
             color: white !important;
@@ -652,6 +652,12 @@ if st.session_state.step == "login":
             font-weight: bold;
             margin-top: 15px;
         }
+
+        /* Liens secondaires */
+        .secondary-links {
+            text-align: center;
+            margin-top: 15px;
+        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -659,63 +665,49 @@ if st.session_state.step == "login":
     empty_l, col_center, empty_r = st.columns([1, 2, 1])
 
     with col_center:
-        st.write("#") 
+        st.write("#") # Espace pour centrer verticalement
         
+        # On crée un conteneur spécial
         with st.container():
-            # Marqueur pour le CSS
+            # Cette div vide sert de "marqueur" pour le CSS ci-dessus
             st.markdown('<div class="blue-panel"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="login-title">Connexion</div>', unsafe_allow_html=True)
+            st.markdown('<div class="login-title">📚 Connexion - Plateforme EDT</div>', unsafe_allow_html=True)
 
-            # --- TON CODE BACKEND EXACT ---
-            email = st.text_input("Email")
-            password = st.text_input("Mot de passe", type="password")
+            email = st.text_input("Email", placeholder="votre@email.com")
+            password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
+            
+            if st.button("Se connecter"):
+                roles_tables = {
+                    "Etudiant": "etudiants", "Professeur": "professeurs",
+                    "Chef": "chefs_departement", "Admin": "administrateurs",
+                    "Vice-doyen": "vice_doyens", "Administrateur examens": "administrateurs"
+                }
 
-            col1, col2, col3 = st.columns(3)
+                found_user = False
+                for role_name, table_name in roles_tables.items():
+                    users = db_select(table_name, "*", eq={"email": email, "password": password})
+                    if users:
+                        st.session_state.user_email = email
+                        st.session_state.role = role_name
+                        st.session_state.step = "dashboard"
+                        found_user = True
+                        break
 
-            # ======================
-            # LOGIN BUTTON
-            # ======================
-            with col1:
-                if st.button("Se connecter"):
-                    roles_tables = {
-                        "Etudiant": "etudiants",
-                        "Professeur": "professeurs",
-                        "Chef": "chefs_departement",
-                        "Admin": "administrateurs",
-                        "Vice-doyen": "vice_doyens",
-                        "Administrateur examens": "administrateurs"
-                    }
+                if found_user:
+                    st.success(f"Connecté en tant que {st.session_state.role}")
+                    st.rerun()
+                else:
+                    st.error("Identifiants incorrects")
 
-                    found_user = False
-                    for role_name, table_name in roles_tables.items():
-                        # Use Supabase for authentication lookup
-                        users = db_select(table_name, "*", eq={"email": email, "password": password})
-                        if users:
-                            st.session_state.user_email = email
-                            st.session_state.role = role_name
-                            st.session_state.step = "dashboard"
-                            found_user = True
-                            break
-
-                    if found_user:
-                        st.success(f"Connecté en tant que {st.session_state.role}")
-                        st.rerun()
-                    else:
-                        st.error("Email ou mot de passe incorrect")
-
-            # ======================
-            # FORGOT PASSWORD
-            # ======================
-            with col2:
-                if st.button("Mot de passe oublié ?"):
+            # Liens Inscription / MDP Oublié
+            st.write("---")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Mot de passe oublié ?", key="forgot"):
                     st.session_state.step = "forgot_email"
                     st.rerun()
-
-            # ======================
-            # NEW REGISTRATION
-            # ======================
-            with col3:
-                if st.button("Nouvelle inscription"):
+            with c2:
+                if st.button("Nouvelle inscription", key="signup"):
                     st.session_state.step = "choose_role"
                     st.rerun()
 # ==================================================
