@@ -20,6 +20,107 @@ SUPABASE_URL = st.secrets["supabase"]["url"]
 SUPABASE_KEY = st.secrets["supabase"]["key"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# ======================
+# BACKWARDS COMPATIBILITY: cursor / conn
+# ======================
+# You mentioned you changed the cursor; many parts of the script still expect a DB
+# connection object `conn` and a DB cursor `cursor` with methods:
+#   - cursor.execute(sql, params)
+#   - cursor.fetchone()
+#   - cursor.fetchall()
+#   - conn.commit()
+#
+# This block attempts to create a real DB connection from st.secrets["db"] (or st.secrets["database"])
+# supporting psycopg2 (Postgres), mysql.connector, or pymysql. If no usable secrets/driver is found,
+# it provides a DummyCursor that gives clear runtime errors explaining how to configure secrets.
+#
+# To fully enable all DB operations provide st.secrets["db"] with keys:
+#   host, port, user, password, database, optional driver ("psycopg2" or "mysql" or "pymysql")
+#
+conn = None
+cursor = None
+
+def make_cursor_from_secrets():
+    db_secrets = st.secrets.get("db") or st.secrets.get("database") or {}
+    if not db_secrets:
+        return None, None
+
+    host = db_secrets.get("host")
+    port = db_secrets.get("port")
+    user = db_secrets.get("user")
+    password = db_secrets.get("password")
+    database = db_secrets.get("database") or db_secrets.get("dbname")
+    driver = (db_secrets.get("driver") or "auto").lower()
+
+    # Try psycopg2 / Postgres first if requested or auto
+    if driver in ("psycopg2", "postgres", "pg", "auto"):
+        try:
+            import psycopg2
+            import psycopg2.extras
+            conn_pg = psycopg2.connect(
+                host=host, port=port or 5432, user=user, password=password, dbname=database
+            )
+            cur_pg = conn_pg.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            return conn_pg, cur_pg
+        except Exception:
+            # fallthrough to try mysql drivers
+            pass
+
+    # Try mysql.connector
+    if driver in ("mysql", "mysql.connector", "auto"):
+        try:
+            import mysql.connector
+            conn_my = mysql.connector.connect(
+                host=host, port=int(port) if port else 3306, user=user, password=password, database=database
+            )
+            cur_my = conn_my.cursor(dictionary=True)
+            return conn_my, cur_my
+        except Exception:
+            pass
+
+    # Try pymysql
+    if driver in ("pymysql", "auto"):
+        try:
+            import pymysql
+            conn_pm = pymysql.connect(
+                host=host, port=int(port) if port else 3306, user=user, password=password, db=database,
+                cursorclass=pymysql.cursors.DictCursor
+            )
+            cur_pm = conn_pm.cursor()
+            return conn_pm, cur_pm
+        except Exception:
+            pass
+
+    return None, None
+
+try:
+    conn, cursor = make_cursor_from_secrets()
+except Exception:
+    conn, cursor = None, None
+
+if cursor is None:
+    class DummyCursor:
+        def execute(self, *args, **kwargs):
+            sql = args[0] if args else "<sql missing>"
+            raise RuntimeError(
+                "No working DB cursor available. To enable DB queries, add database credentials to Streamlit secrets under "
+                "`st.secrets['db']` with keys: host, port, user, password, database and optional 'driver' "
+                "('psycopg2' or 'mysql' or 'pymysql').\n"
+                f"Attempted SQL: {sql}"
+            )
+        def fetchone(self):
+            return None
+        def fetchall(self):
+            return []
+    class DummyConn:
+        def commit(self):
+            raise RuntimeError(
+                "No working DB connection available to commit. Provide DB credentials in st.secrets['db']."
+            )
+
+    cursor = DummyCursor()
+    conn = DummyConn()
+
 tables_reset = ['etudiants','professeurs','chefs_departement','administrateurs','vice_doyens']
 
 # ======================
