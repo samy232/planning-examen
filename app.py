@@ -598,56 +598,82 @@ for key, value in defaults.items():
 # PAGE 1 — LOGIN + INSCRIPTION
 # ==================================================
 # ==================================================
-# PAGE 1 — LOGIN + INSCRIPTION (VERSION PRO SIDE-BY-SIDE)
+# PAGE 1 — LOGIN + INSCRIPTION (VERSION DARK & BLUE GRADIENT)
 # ==================================================
 if st.session_state.step == "login":
-    
-    # Suppression des marges par défaut de Streamlit pour un look "Full Screen"
+
+    # --- CSS POUR LE DESIGN NOIR & BLEU GRADIENT ---
     st.markdown("""
         <style>
-            .block-container {padding: 0rem !important;}
-            [data-testid="stHeader"] {display: none;}
-            .stApp {background-color: white;}
-            
-            /* Style des champs de saisie */
-            .stTextInput input {
-                background-color: #F0F2F6 !important;
-                border: none !important;
-                border-radius: 10px !important;
-                height: 45px;
-            }
+        /* Fond de la page en noir classique */
+        .stApp {
+            background-color: #000000 !important;
+        }
+
+        /* Panneau central avec dégradé bleu et ombre */
+        .login-panel {
+            background: linear-gradient(135deg, #1E3A8A 0%, #111827 100%);
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0px 10px 30px rgba(0, 133, 255, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+            color: white;
+        }
+
+        /* Styliser les inputs pour qu'ils s'intègrent au bleu */
+        .stTextInput input {
+            background-color: rgba(255, 255, 255, 0.1) !important;
+            color: white !important;
+            border: 1px solid rgba(255, 255, 255, 0.2) !important;
+            border-radius: 10px !important;
+        }
+
+        /* Bouton Login style CustomTkinter */
+        div.stButton > button:first-child {
+            background-color: #0085FF !important;
+            color: white !important;
+            border: none;
+            border-radius: 10px;
+            height: 45px;
+            width: 100%;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        /* Boutons secondaires (MDP oublié / Inscription) */
+        div.stButton > button[kind="secondary"] {
+            background-color: transparent !important;
+            color: #60A5FA !important;
+            border: none !important;
+            text-decoration: underline;
+            font-size: 13px;
+        }
         </style>
     """, unsafe_allow_html=True)
 
-    # Division de l'écran en deux colonnes
-    col_img, col_form = st.columns([1.2, 1])
+    # --- CENTRAGE DU PANNEAU ---
+    empty_l, col_center, empty_r = st.columns([1, 2, 1])
 
-    with col_img:
-        # Image de gauche qui prend toute la hauteur
-        st.image("https://images.unsplash.com/photo-1434030216411-0b793f4b4173?q=80&w=2070&auto=format&fit=crop", 
-                 use_container_width=True)
-
-    with col_form:
-        # On ajoute du padding pour centrer le formulaire verticalement
-        st.markdown("<div style='padding: 100px 50px;'>", unsafe_allow_html=True)
+    with col_center:
+        st.write("#") # Espace vertical
+        st.write("#") 
         
-        st.markdown("<h1 style='color: #1E1E1E; font-size: 35px; font-weight: 800;'>Welcome Back!</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='color: #718096; margin-bottom: 40px;'>Login to your EDT Account</p>", unsafe_allow_html=True)
+        st.markdown('<div class="login-panel">', unsafe_allow_html=True)
+        st.markdown("<h2 style='margin-bottom:20px;'>Connexion</h2>", unsafe_allow_html=True)
 
-        # Formulaire
-        email = st.text_input("Email", placeholder="example@univ.dz")
-        password = st.text_input("Password", type="password", placeholder="••••••••")
+        # Champs de saisie
+        email = st.text_input("Email", placeholder="votre@email.com", label_visibility="collapsed")
+        password = st.text_input("Mot de passe", type="password", placeholder="Mot de passe", label_visibility="collapsed")
         
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # Bouton de connexion stylé
-        if st.button("Login", use_container_width=True, type="primary"):
+        # Bouton principal
+        if st.button("Se connecter"):
             roles_tables = {
                 "Etudiant": "etudiants", "Professeur": "professeurs",
                 "Chef": "chefs_departement", "Admin": "administrateurs",
                 "Vice-doyen": "vice_doyens", "Administrateur examens": "administrateurs"
             }
-            
+
             found_user = False
             for role_name, table_name in roles_tables.items():
                 users = db_select(table_name, "*", eq={"email": email, "password": password})
@@ -657,26 +683,23 @@ if st.session_state.step == "login":
                     st.session_state.step = "dashboard"
                     found_user = True
                     break
-            
+
             if found_user:
                 st.rerun()
             else:
-                st.error("Email ou mot de passe incorrect")
+                st.error("Identifiants incorrects")
 
-        # Liens du bas
-        st.markdown("<br>", unsafe_allow_html=True)
-        c_forgot, c_signup = st.columns(2)
-        
-        with c_forgot:
-            if st.button("Forgot Password?", key="forgot", help="Cliquez pour réinitialiser"):
-                st.toast("Contactez le service informatique.")
-        
-        with c_signup:
-            if st.button("Create Account!", key="signup"):
+        # Liens du bas (Mot de passe oublié & Inscription)
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Mot de passe oublié ?", key="forgot"):
+                st.info("Contactez l'Admin.")
+        with c2:
+            if st.button("Créer un compte", key="signup"):
                 st.session_state.step = "signup"
                 st.rerun()
 
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 # ==================================================
 # PAGE 2 — CHOIX DU RÔLE
 # ==================================================
