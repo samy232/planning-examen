@@ -609,16 +609,16 @@ def db_select(table, columns, eq=None):
 
 
 # ==================================================
-# PAGE 1 — LOGIN + INSCRIPTION
+# PAGE 1 — LOGIN + INSCRIPTION (DESIGN & BACKEND FIX)
 # ==================================================
 if st.session_state.step == "login":
 
-    # --- CSS : LE DESIGN DU PANNEAU UNIQUE ---
+    # --- CSS : DESIGN NOIR & BLEU GRADIENT ---
     st.markdown("""
         <style>
         .stApp { background-color: #000000 !important; }
 
-        /* Ciblage du conteneur pour le transformer en panneau bleu */
+        /* Le Panneau Bleu Unique */
         [data-testid="stVerticalBlock"] > div:has(div.blue-panel) {
             background: linear-gradient(135deg, #1E3A8A 0%, #111827 100%) !important;
             padding: 45px !important;
@@ -635,7 +635,6 @@ if st.session_state.step == "login":
             margin-bottom: 25px;
         }
 
-        /* Champs Email/MDP */
         .stTextInput input {
             background-color: rgba(255, 255, 255, 0.1) !important;
             color: white !important;
@@ -658,58 +657,65 @@ if st.session_state.step == "login":
         </style>
     """, unsafe_allow_html=True)
 
-    # --- MISE EN PAGE ---
+    # --- STRUCTURE VISUELLE ---
     _, col_center, _ = st.columns([0.6, 1, 0.6])
 
     with col_center:
         st.write("#") 
         
         with st.container():
-            # Marqueur obligatoire pour le style
+            # Marqueur pour le CSS
             st.markdown('<div class="blue-panel"></div>', unsafe_allow_html=True)
             st.markdown('<div class="login-title">Connexion</div>', unsafe_allow_html=True)
 
-            # --- TES INPUTS ---
-            email = st.text_input("Email", placeholder="votre@email.com")
-            password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
+            # Utilisation de clés uniques pour éviter les conflits de session
+            input_email = st.text_input("Email", placeholder="votre@email.com", key="login_email_input").strip()
+            input_password = st.text_input("Mot de passe", type="password", placeholder="••••••••", key="login_pw_input")
             
-            # --- TON BACKEND (EXACTEMENT COMME DEMANDÉ) ---
-            if st.button("Se connecter"):
-                roles_tables = {
-                    "Etudiant": "etudiants",
-                    "Professeur": "professeurs",
-                    "Chef": "chefs_departement",
-                    "Admin": "administrateurs",
-                    "Vice-doyen": "vice_doyens",
-                    "Administrateur examens": "administrateurs"
-                }
+            # --- BACKEND : LOGIQUE DE CONNEXION ---
+            if st.button("Se connecter", key="btn_login_main"):
+                if input_email and input_password:
+                    roles_tables = {
+                        "Etudiant": "etudiants",
+                        "Professeur": "professeurs",
+                        "Chef": "chefs_departement",
+                        "Admin": "administrateurs",
+                        "Vice-doyen": "vice_doyens",
+                        "Administrateur examens": "administrateurs"
+                    }
 
-                found_user = False
-                for role_name, table_name in roles_tables.items():
-                    # Utilisation de db_select Supabase
-                    users = db_select(table_name, "*", eq={"email": email, "password": password})
-                    if users:
-                        st.session_state.user_email = email
-                        st.session_state.role = role_name
-                        st.session_state.step = "dashboard"
-                        found_user = True
-                        break
+                    found_user = False
+                    with st.spinner("Vérification..."):
+                        for role_name, table_name in roles_tables.items():
+                            # Appel direct à ta fonction db_select
+                            users = db_select(table_name, "*", eq={"email": input_email, "password": input_password})
+                            
+                            if users and len(users) > 0:
+                                st.session_state.user_email = input_email
+                                st.session_state.role = role_name
+                                st.session_state.step = "dashboard"
+                                found_user = True
+                                break
 
-                if found_user:
-                    st.success(f"Connecté en tant que {st.session_state.role}")
-                    st.rerun()
+                    if found_user:
+                        st.success(f"Bienvenue {st.session_state.role} !")
+                        time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.error("Email ou mot de passe incorrect")
                 else:
-                    st.error("Email ou mot de passe incorrect")
+                    st.warning("Veuillez remplir tous les champs")
 
-            # --- NAVIGATION BAS DE PAGE ---
-            st.markdown("<hr style='opacity:0.2'>", unsafe_allow_html=True)
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("Mot de passe oublié ?"):
+            # --- NAVIGATION BAS DE PANNEAU ---
+            st.markdown("<hr style='opacity:0.2; margin: 20px 0;'>", unsafe_allow_html=True)
+            
+            col_forgot, col_new = st.columns(2)
+            with col_forgot:
+                if st.button("Mot de passe oublié ?", key="btn_forgot"):
                     st.session_state.step = "forgot_email"
                     st.rerun()
-            with c2:
-                if st.button("Nouvelle inscription"):
+            with col_new:
+                if st.button("Nouvelle inscription", key="btn_new_reg"):
                     st.session_state.step = "choose_role"
                     st.rerun()
 # ==================================================
