@@ -648,10 +648,23 @@ if st.session_state.step == "login":
             border: none;
             border-radius: 10px;
             height: 50px;
+            width: 400%;
+            font-weight: bold;
+            margin-top: 15px;
+        }
+
+        /* Bouton Login */
+        div.stButton1 > button:first-child {
+            background-color: #0085FF !important;
+            color: white !important;
+            border: none;
+            border-radius: 10px;
+            height: 50px;
             width: 300%;
             font-weight: bold;
             margin-top: 15px;
         }
+
 
         /* Liens secondaires */
         .secondary-links {
@@ -703,11 +716,11 @@ if st.session_state.step == "login":
             st.write("---")
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("Mot de passe oublié ?", key="forgot"):
+                if st.button1("Mot de passe oublié ?", key="forgot"):
                     st.session_state.step = "forgot_email"
                     st.rerun()
             with c2:
-                if st.button("Nouvelle inscription", key="signup"):
+                if st.button1("Nouvelle inscription", key="signup"):
                     st.session_state.step = "choose_role"
                     st.rerun()
 # ==================================================
