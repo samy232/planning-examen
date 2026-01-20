@@ -641,65 +641,48 @@ if st.session_state.step == "login":
             color: white !important;
         }
 
-        /* Bouton Login */
-        div.stButton > button:first-child {
-            background-color: #0085FF !important;
-            color: white !important;
-            border: none;
-            border-radius: 10px;
-            height: 50px;
-            width: 100%;
-            font-weight: bold;
-            margin-top: 15px;
+        /* STYLE DU BOUTON PRINCIPAL (Se connecter) */
+        /* On cible le bouton qui n'est pas dans les colonnes du bas */
+        div.stButton > button {
+            width: 100% !important;
+            border-radius: 10px !important;
+            height: 50px !important;
+            font-weight: bold !important;
         }
 
-        /* ----- STYLE DU BOUTON LOGIN UNIQUEMENT ----- */
-        .login-container div.stButton > button {
+        /* Couleur spécifique pour le bouton de connexion */
+        div.stButton > button[kind="primary"] {
             background-color: #0085FF !important;
             color: white !important;
-            border: none;
-            border-radius: 10px;
-            height: 50px;
-            width: 500%;
-            font-weight: bold;
-            margin-top: 15px;
-}
-
-        /* Liens secondaires */
-        .secondary-links {
-            text-align: center;
-            margin-top: 15px;
+            border: none !important;
         }
+
+        .stTextInput input {
+            background-color: rgba(255, 255, 255, 0.1) !important;
+            color: white !important;
+            border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        }
+        .stTextInput label { color: white !important; }
         </style>
     """, unsafe_allow_html=True)
 
-    # --- CENTRAGE ET CONTENU ---
     empty_l, col_center, empty_r = st.columns([1, 2, 1])
 
     with col_center:
-        st.write("#") # Espace pour centrer verticalement
-        
-        # On crée un conteneur spécial
         with st.container():
-            # Cette div vide sert de "marqueur" pour le CSS ci-dessus
             st.markdown('<div class="blue-panel"></div>', unsafe_allow_html=True)
             st.markdown('<div class="login-title">📚 Connexion - Plateforme EDT</div>', unsafe_allow_html=True)
 
             email = st.text_input("Email", placeholder="votre@email.com")
             password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
             
-            with st.container():
-                st.markdown('<div class="login-container"></div>', unsafe_allow_html=True)
-
-                 if st.button("Se connecter"):
-                    roles_tables = {
-                        "Etudiant": "etudiants", 
-                        "Professeur": "professeurs",
-                        "Chef": "chefs_departement", 
-                        "Admin": "administrateurs",
-                        "Vice-doyen": "vice_doyens", 
-                        "Administrateur examens": "administrateurs"
-                    }
+            # --- BOUTON DE CONNEXION (SORTI DES COLONNES POUR ETRE LARGE) ---
+            if st.button("Se connecter", type="primary"):
+                roles_tables = {
+                    "Etudiant": "etudiants", "Professeur": "professeurs",
+                    "Chef": "chefs_departement", "Admin": "administrateurs",
+                    "Vice-doyen": "vice_doyens", "Administrateur examens": "administrateurs"
+                }
 
                 found_user = False
                 for role_name, table_name in roles_tables.items():
@@ -709,7 +692,7 @@ if st.session_state.step == "login":
                         st.session_state.role = role_name
                         st.session_state.step = "dashboard"
                         found_user = True
-                    break
+                        break
 
                 if found_user:
                     st.success(f"Connecté en tant que {st.session_state.role}")
@@ -717,9 +700,9 @@ if st.session_state.step == "login":
                 else:
                     st.error("Identifiants incorrects")
 
-
-            # Liens Inscription / MDP Oublié
             st.write("---")
+            
+            # --- BOUTONS SECONDAIRES (EUX RESTENT EN COLONNES) ---
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("Mot de passe oublié ?", key="forgot"):
@@ -728,7 +711,7 @@ if st.session_state.step == "login":
             with c2:
                 if st.button("Nouvelle inscription", key="signup"):
                     st.session_state.step = "choose_role"
-                    st.rerun()c
+                    st.rerun()
 # ==================================================
 # PAGE 2 — CHOIX DU RÔLE
 # ==================================================
