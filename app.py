@@ -644,7 +644,7 @@ if st.session_state.step == "login":
         /* STYLE DU BOUTON PRINCIPAL (Se connecter) */
         /* On cible le bouton qui n'est pas dans les colonnes du bas */
         div.stButton > button {
-            width: 100% !important;
+            width: 500% !important;
             border-radius: 10px !important;
             height: 50px !important;
             font-weight: bold !important;
