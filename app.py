@@ -594,18 +594,7 @@ for key, value in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
-import streamlit as st
 
-# Configuration
-st.set_page_config(page_title="Connexion EDT", layout="wide")
-
-# Initialisation
-if "step" not in st.session_state:
-    st.session_state.step = "login"
-
-# Simulation de la fonction db_select pour le test
-def db_select(table, columns, eq=None):
-    return []
 
 
 # ==================================================
