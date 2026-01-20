@@ -641,7 +641,6 @@ if st.session_state.step == "login":
             border-radius: 10px !important;
             height: 50px !important;   /* MEME HAUTEUR POUR TOUS */
             font-weight: bold !important;
-            display: block !important;
              margin-left: 50% !important;   /* <-- MOVE LEFT */
         }
 
