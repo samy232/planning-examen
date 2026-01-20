@@ -597,20 +597,53 @@ for key, value in defaults.items():
 # ==================================================
 # PAGE 1 — LOGIN + INSCRIPTION
 # ==================================================
+# ==================================================
+# PAGE 1 — LOGIN + INSCRIPTION (VERSION DESIGN)
+# ==================================================
 if st.session_state.step == "login":
+    
+    # CSS pour styliser le cadre et les boutons comme dans CustomTkinter
+    st.markdown("""
+        <style>
+        .login-box {
+            background-color: #D9D9D9;
+            padding: 40px;
+            border-radius: 20px;
+            border: 1px solid #ccc;
+        }
+        .stButton>button {
+            background-color: #0085FF !important;
+            color: white !important;
+            border-radius: 15px !important;
+            height: 45px !important;
+            width: 100% !important;
+            font-weight: bold !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
-    st.title("📚 Connexion - Plateforme EDT")
+    # Mise en page : Image à gauche (bg1.jpg), Formulaire à droite
+    col_img, col_form = st.columns([1, 1], gap="large")
 
-    email = st.text_input("Email")
-    password = st.text_input("Mot de passe", type="password")
+    with col_img:
+        # On essaie d'afficher l'image de fond si elle existe
+        try:
+            st.image("bg1.jpg", use_container_width=True)
+        except:
+            # Si l'image n'est pas là, on met un espace vide stylé
+            st.markdown("<div style='height: 400px; background: linear-gradient(135deg, #0085FF 0%, #003366 100%); border-radius:20px;'></div>", unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns(3)
+    with col_form:
+        st.markdown('<div class="login-box">', unsafe_allow_html=True)
+        st.markdown("### Welcome Back! \n **Login to Account**")
+        
+        email = st.text_input("Email", placeholder="Username", label_visibility="collapsed")
+        password = st.text_input("Mot de passe", type="password", placeholder="Password", label_visibility="collapsed")
+        
+        st.write("") # Espace
 
-    # ======================
-    # LOGIN BUTTON
-    # ======================
-    with col1:
-        if st.button("Se connecter"):
+        # LOGIN LOGIC
+        if st.button("Login"):
             roles_tables = {
                 "Etudiant": "etudiants",
                 "Professeur": "professeurs",
@@ -622,7 +655,6 @@ if st.session_state.step == "login":
 
             found_user = False
             for role_name, table_name in roles_tables.items():
-                # Use Supabase for authentication lookup
                 users = db_select(table_name, "*", eq={"email": email, "password": password})
                 if users:
                     st.session_state.user_email = email
@@ -632,27 +664,13 @@ if st.session_state.step == "login":
                     break
 
             if found_user:
-                st.success(f"Connecté en tant que {st.session_state.role}")
+                st.success(f"Connecté !")
                 st.rerun()
             else:
                 st.error("Email ou mot de passe incorrect")
-
-    # ======================
-    # FORGOT PASSWORD
-    # ======================
-    with col2:
-        if st.button("Mot de passe oublié ?"):
-            st.session_state.step = "forgot_email"
-            st.rerun()
-
-    # ======================
-    # NEW REGISTRATION
-    # ======================
-    with col3:
-        if st.button("Nouvelle inscription"):
-            st.session_state.step = "choose_role"
-            st.rerun()
-
+        
+        st.markdown("<p style='text-align: center; color: black; cursor: pointer;'>Create Account!</p>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 # ==================================================
 # PAGE 2 — CHOIX DU RÔLE
 # ==================================================
