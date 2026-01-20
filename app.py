@@ -605,12 +605,10 @@ if st.session_state.step == "login":
     # --- CSS POUR LE DESIGN NOIR & BLEU GRADIENT ---
     st.markdown("""
         <style>
-        /* Fond de la page en noir */
         .stApp {
             background-color: #000000 !important;
         }
 
-        /* Style du conteneur visuel */
         [data-testid="stVerticalBlock"] > div:has(div.blue-panel) {
             background: linear-gradient(135deg, #1E3A8A 0%, #111827 100%);
             padding: 50px !important;
@@ -619,50 +617,37 @@ if st.session_state.step == "login":
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
         }
 
-        /* Titre blanc */
         .login-title {
             color: white;
             text-align: center;
             font-size: 32px;
             font-weight: bold;
-            margin-top: -100px; /* Remonte le texte à l'intérieur du panneau */
+            margin-top: -100px;
         }
 
-        /* Styliser les inputs */
         .stTextInput input {
             background-color: rgba(255, 255, 255, 0.1) !important;
             color: white !important;
             border: 1px solid rgba(255, 255, 255, 0.2) !important;
             border-radius: 10px !important;
         }
-        
-        /* Couleur des labels en blanc */
+
         .stTextInput label {
             color: white !important;
         }
 
-        /* STYLE DU BOUTON PRINCIPAL (Se connecter) */
-        /* On cible le bouton qui n'est pas dans les colonnes du bas */
         div.stButton > button {
-            width: 300% !important;
+            width: 100% !important;
             border-radius: 10px !important;
             height: 50px !important;
             font-weight: bold !important;
         }
 
-        /* Couleur spécifique pour le bouton de connexion */
         div.stButton > button[kind="primary"] {
             background-color: #0085FF !important;
             color: white !important;
             border: none !important;
         }
-
-        .stTextInput input {
-            background-color: rgba(255, 255, 255, 0.1) !important;
-            color: white !important;
-            border: 1px solid rgba(255, 255, 255, 0.2) !important;
-        }
-        .stTextInput label { color: white !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -675,49 +660,59 @@ if st.session_state.step == "login":
 
             email = st.text_input("Email", placeholder="votre@email.com")
             password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
-            
-            # --- BOUTON DE CONNEXION (SORTI DES COLONNES POUR ETRE LARGE) ---
-            if st.button("Se connecter", type="primary"):
-                roles_tables = {
-                    "Etudiant": "etudiants", "Professeur": "professeurs",
-                    "Chef": "chefs_departement", "Admin": "administrateurs",
-                    "Vice-doyen": "vice_doyens", "Administrateur examens": "administrateurs"
-                }
 
-                found_user = False
-                for role_name, table_name in roles_tables.items():
-                    users = db_select(table_name, "*", eq={"email": email, "password": password})
-                    if users:
-                        st.session_state.user_email = email
-                        st.session_state.role = role_name
-                        st.session_state.step = "dashboard"
-                        found_user = True
-                        break
+            st.write("<div style='height:20px'></div>", unsafe_allow_html=True)
 
-                if found_user:
-                    st.success(f"Connecté en tant que {st.session_state.role}")
+            # ====== CENTERED BUTTON COLUMN ======
+            c1, c2, c3 = st.columns([1, 2, 1])
+            with c2:
+
+                # -------- BOUTON PRINCIPAL --------
+                if st.button("Se connecter", type="primary"):
+                    roles_tables = {
+                        "Etudiant": "etudiants",
+                        "Professeur": "professeurs",
+                        "Chef": "chefs_departement",
+                        "Admin": "administrateurs",
+                        "Vice-doyen": "vice_doyens",
+                        "Administrateur examens": "administrateurs"
+                    }
+
+                    found_user = False
+                    for role_name, table_name in roles_tables.items():
+                        users = db_select(
+                            table_name,
+                            "*",
+                            eq={"email": email, "password": password}
+                        )
+                        if users:
+                            st.session_state.user_email = email
+                            st.session_state.role = role_name
+                            st.session_state.step = "dashboard"
+                            found_user = True
+                            break
+
+                    if found_user:
+                        st.success(f"Connecté en tant que {st.session_state.role}")
+                        st.rerun()
+                    else:
+                        st.error("Identifiants incorrects")
+
+                # -------- LIGNE BLANCHE --------
+                st.markdown("<hr style='border:1px solid white;'>", unsafe_allow_html=True)
+
+                # -------- BOUTONS SECONDAIRES --------
+                if st.button("Mot de passe oublié ?", key="forgot"):
+                    st.session_state.step = "forgot_email"
                     st.rerun()
-                else:
-                    st.error("Identifiants incorrects")
 
-            st.write("---")
-            
-            # --- BOUTONS SECONDAIRES (EUX RESTENT EN COLONNES) ---
-            st.write("---")
+                st.write("")  # petit espace
 
-            # Premier bouton (en haut)
-            if st.button("Mot de passe oublié ?", key="forgot"):
-                st.session_state.step = "forgot_email"
-                st.rerun()
+                if st.button("Nouvelle inscription", key="signup"):
+                    st.session_state.step = "choose_role"
+                    st.rerun()
 
-            # Petit espace entre les boutons (optionnel)
-            st.write("")
-
-            # Deuxième bouton (en dessous)
-            if st.button("Nouvelle inscription", key="signup"):
-                st.session_state.step = "choose_role"
-                st.rerun()
-
+                
 # ==================================================
 # PAGE 2 — CHOIX DU RÔLE
 # ==================================================
