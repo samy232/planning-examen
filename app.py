@@ -12,7 +12,7 @@ import time
 from supabase import create_client, Client
 from collections import defaultdict
 from typing import List, Dict, Any, Optional
-
+import plotly.graph_objects as go
 # ======================
 # CONFIG STREAMLIT
 # ======================
@@ -1196,7 +1196,7 @@ elif st.session_state.step == "dashboard":
             # Salles
             salle_map = {s['id']: s['nom'] for s in db_select("lieu_examen", "id, nom")}
 
-            # --- ÉTAPE B : STATISTIQUES MODERNES (GRAPHIQUE) ---
+            # --- ÉTAPE B : STATISTIQUES MODERNES (GRAPHIQUE CIRCULAIRE) ---
             st.subheader("📊 Performance du Département")
             
             # Préparation des données pour le graphique
@@ -1212,10 +1212,22 @@ elif st.session_state.step == "dashboard":
             
             with col_b:
                 if stats_form:
-                    # Graphique simple mais efficace
-                    st.bar_chart(stats_form)
-
-            st.divider()
+                    # Génération du diagramme circulaire (Pie/Donut Chart)
+                    fig = go.Figure(data=[go.Pie(
+                        labels=list(stats_form.keys()), 
+                        values=list(stats_form.values()), 
+                        hole=.4, # Crée l'effet "Donut" (cercle vide au centre)
+                        marker=dict(colors=['#636EFA', '#EF553B', '#00CC96', '#AB63FA']) # Jolies couleurs
+                    )])
+                    
+                    fig.update_layout(
+                        margin=dict(t=0, b=0, l=0, r=0),
+                        height=250,
+                        showlegend=True,
+                        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
 
             # --- ÉTAPE C : CONFLITS PAR FORMATION ---
             st.subheader("⚠️ Conflits par Formation")
