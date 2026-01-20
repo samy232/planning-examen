@@ -637,10 +637,12 @@ if st.session_state.step == "login":
         }
 
         div.stButton > button {
-            width: 100% !important;
+            width: 280px !important;   /* MEME LARGEUR POUR TOUS */
             border-radius: 10px !important;
-            height: 50px !important;
+            height: 50px !important;   /* MEME HAUTEUR POUR TOUS */
             font-weight: bold !important;
+            display: block !important;
+            margin: 0 auto !important; /* CENTRAGE */
         }
 
         div.stButton > button[kind="primary"] {
