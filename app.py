@@ -644,7 +644,7 @@ if st.session_state.step == "login":
         /* STYLE DU BOUTON PRINCIPAL (Se connecter) */
         /* On cible le bouton qui n'est pas dans les colonnes du bas */
         div.stButton > button {
-            width: 500% !important;
+            width: 400% !important;
             border-radius: 10px !important;
             height: 50px !important;
             font-weight: bold !important;
@@ -703,15 +703,21 @@ if st.session_state.step == "login":
             st.write("---")
             
             # --- BOUTONS SECONDAIRES (EUX RESTENT EN COLONNES) ---
-            c1, c2 = st.columns(1)
-            with c1:
-                if st.button("Mot de passe oublié ?", key="forgot"):
-                    st.session_state.step = "forgot_email"
-                    st.rerun()
-            with c2:
-                if st.button("Nouvelle inscription", key="signup"):
-                    st.session_state.step = "choose_role"
-                    st.rerun()
+            st.write("---")
+
+            # Premier bouton (en haut)
+            if st.button("Mot de passe oublié ?", key="forgot"):
+                st.session_state.step = "forgot_email"
+                st.rerun()
+
+            # Petit espace entre les boutons (optionnel)
+            st.write("")
+
+            # Deuxième bouton (en dessous)
+            if st.button("Nouvelle inscription", key="signup"):
+                st.session_state.step = "choose_role"
+                st.rerun()
+
 # ==================================================
 # PAGE 2 — CHOIX DU RÔLE
 # ==================================================
