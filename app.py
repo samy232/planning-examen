@@ -691,7 +691,7 @@ if st.session_state.step == "login":
             with st.container():
                 st.markdown('<div class="login-container"></div>', unsafe_allow_html=True)
 
-                if st.button("Se connecter"):
+                 if st.button("Se connecter"):
                     roles_tables = {
                         "Etudiant": "etudiants", 
                         "Professeur": "professeurs",
