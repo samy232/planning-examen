@@ -747,16 +747,17 @@ elif st.session_state.step == "dashboard":
             st.session_state.role = ""
             st.rerun()
 
-  # --------------------
-# Étudiant & Professeur UIs
 # --------------------
+# Étudiant & Professeur UIs (inchangées)
+# --------------------
+
 if role == "Etudiant":
     st.title(f"👋 Bienvenue, {user_data.get('prenom','')} {user_data.get('nom','') if user_data else ''}")
     st.subheader("🎓 Emploi du temps des examens")
 
-    # Liste des modules de l'étudiant
+    # Récupération des modules de l'étudiant
     cursor.execute("""
-        SELECT DISTINCT m.nom
+        SELECT DISTINCT m.nom 
         FROM modules m
         JOIN inscriptions i ON i.module_id = m.id
         JOIN etudiants et ON et.id = i.etudiant_id
@@ -764,6 +765,7 @@ if role == "Etudiant":
     """, (email,))
     liste_modules = [row['nom'] for row in cursor.fetchall()]
 
+    # Filtres
     col_f1, col_f2 = st.columns(2)
     with col_f1:
         module_filtre = st.selectbox("Filtrer par Module", ["Tous les modules"] + liste_modules)
@@ -773,9 +775,13 @@ if role == "Etudiant":
         except Exception:
             date_filtre = None
 
-    # Requête principale — PostgreSQL syntaxe
+    # Requête des examens
     query = """
-        SELECT m.nom AS module, l.nom AS salle, e.date_heure AS date_heure, e.duree_minutes AS duree
+        SELECT 
+            m.nom AS Module, 
+            l.nom AS Salle, 
+            e.date_heure AS 'Date & Heure', 
+            e.duree_minutes AS 'Durée'
         FROM examens e
         JOIN modules m ON e.module_id = m.id
         JOIN lieu_examen l ON e.salle_id = l.id
@@ -790,6 +796,7 @@ if role == "Etudiant":
     if date_filtre:
         query += " AND DATE(e.date_heure) = %s"
         params.append(date_filtre)
+
     query += " ORDER BY e.date_heure ASC"
     cursor.execute(query, tuple(params))
     resultats = cursor.fetchall()
@@ -803,11 +810,9 @@ elif role == "Professeur":
     st.title(f"👨‍🏫 Bienvenue, M. {user_data.get('nom','') if user_data else ''}")
     st.subheader("📋 Mes surveillances d'examens")
 
-    col_f1, col_f2, col_f3 = st.columns(3)
-
-    # Liste des modules et salles du professeur
+    # Récupération des modules et salles pour le professeur
     cursor.execute("""
-        SELECT DISTINCT m.nom
+        SELECT DISTINCT m.nom 
         FROM modules m
         JOIN examens e ON e.module_id = m.id
         JOIN professeurs p ON p.id = e.prof_id
@@ -816,7 +821,7 @@ elif role == "Professeur":
     liste_modules_prof = [row['nom'] for row in cursor.fetchall()]
 
     cursor.execute("""
-        SELECT DISTINCT l.nom
+        SELECT DISTINCT l.nom 
         FROM lieu_examen l
         JOIN examens e ON e.salle_id = l.id
         JOIN professeurs p ON p.id = e.prof_id
@@ -824,6 +829,8 @@ elif role == "Professeur":
     """, (email,))
     liste_salles_prof = [row['nom'] for row in cursor.fetchall()]
 
+    # Filtres
+    col_f1, col_f2, col_f3 = st.columns(3)
     with col_f1:
         mod_f = st.selectbox("Par Module", ["Tous les modules"] + liste_modules_prof)
     with col_f2:
@@ -834,9 +841,13 @@ elif role == "Professeur":
         except Exception:
             dat_f = None
 
-    # Requête principale professeur — PostgreSQL
+    # Requête des surveillances
     query_prof = """
-        SELECT m.nom AS module, l.nom AS salle, e.date_heure AS date_heure, e.duree_minutes AS duree
+        SELECT 
+            m.nom AS Module, 
+            l.nom AS Salle, 
+            e.date_heure AS 'Date & Heure', 
+            e.duree_minutes AS 'Durée'
         FROM examens e
         JOIN modules m ON e.module_id = m.id
         JOIN lieu_examen l ON e.salle_id = l.id
@@ -853,8 +864,8 @@ elif role == "Professeur":
     if dat_f:
         query_prof += " AND DATE(e.date_heure) = %s"
         params_prof.append(dat_f)
-    query_prof += " ORDER BY e.date_heure ASC"
 
+    query_prof += " ORDER BY e.date_heure ASC"
     cursor.execute(query_prof, tuple(params_prof))
     res_prof = cursor.fetchall()
 
