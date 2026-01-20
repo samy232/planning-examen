@@ -598,85 +598,81 @@ for key, value in defaults.items():
 # PAGE 1 — LOGIN + INSCRIPTION
 # ==================================================
 # ==================================================
-# PAGE 1 — LOGIN + INSCRIPTION (FIXED INTERNAL PANEL)
+# PAGE 1 — LOGIN (PANNEAU FLOTTANT DANS FOND DÉGRADÉ)
 # ==================================================
 if st.session_state.step == "login":
 
-    # --- CSS POUR LE DESIGN NOIR & BLEU GRADIENT ---
+    # --- CSS CORRIGÉ ---
     st.markdown("""
         <style>
-        /* Fond de la page en noir */
+        /* 1. LE GRAND FOND (Toute la page) */
         .stApp {
-            background-color: #000000 !important;
+            background: linear-gradient(135deg, #1E3A8A 0%, #000000 100%) !important;
         }
 
-        /* Style du conteneur visuel */
-        [data-testid="stVerticalBlock"] > div:has(div.blue-panel) {
-            background: linear-gradient(135deg, #1E3A8A 0%, #111827 100%);
+        /* 2. LE PETIT PANNEAU CENTRAL (La carte de login) */
+        div[data-testid="stVerticalBlock"] > div:has(div.login-card) {
+            background-color: rgba(17, 24, 39, 0.7) !important; /* Bleu très sombre transparent */
+            backdrop-filter: blur(10px); /* Effet flou moderne */
             padding: 40px !important;
-            border-radius: 20px !important;
-            box-shadow: 0px 10px 40px rgba(0, 133, 255, 0.4) !important;
+            border-radius: 25px !important;
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            box-shadow: 0px 20px 50px rgba(0, 0, 0, 0.5) !important;
+            max-width: 500px;
+            margin: auto;
         }
 
-        /* Titre blanc */
+        /* Titre et Labels */
         .login-title {
             color: white;
             text-align: center;
-            font-size: 32px;
+            font-size: 30px;
             font-weight: bold;
-            margin-bottom: 20px;
+            margin-bottom: 30px;
         }
+        label { color: white !important; }
 
-        /* Styliser les inputs */
+        /* Champs de saisie */
         .stTextInput input {
-            background-color: rgba(255, 255, 255, 0.1) !important;
+            background-color: rgba(255, 255, 255, 0.05) !important;
             color: white !important;
             border: 1px solid rgba(255, 255, 255, 0.2) !important;
-            border-radius: 10px !important;
+            border-radius: 12px !important;
+        }
+
+        /* Boutons */
+        div.stButton > button {
+            border-radius: 12px !important;
+            font-weight: bold !important;
         }
         
-        /* Couleur des labels en blanc */
-        .stTextInput label {
-            color: white !important;
-        }
-
-        /* Bouton Login */
-        div.stButton > button:first-child {
+        /* Bouton de connexion large */
+        div.stButton > button[kind="primary"] {
             background-color: #0085FF !important;
-            color: white !important;
-            border: none;
-            border-radius: 10px;
-            height: 48px;
-            width: 100%;
-            font-weight: bold;
-            margin-top: 15px;
-        }
-
-        /* Liens secondaires */
-        .secondary-links {
-            text-align: center;
-            margin-top: 15px;
+            width: 100% !important;
+            height: 50px;
         }
         </style>
     """, unsafe_allow_html=True)
 
-    # --- CENTRAGE ET CONTENU ---
-    empty_l, col_center, empty_r = st.columns([1, 2, 1])
+    # --- MISE EN PAGE ---
+    # On utilise des colonnes pour bien centrer le petit panneau au milieu
+    _, col_center, _ = st.columns([0.5, 1, 0.5])
 
     with col_center:
-        st.write("#") # Espace pour centrer verticalement
+        st.write("##") # Espace vertical pour descendre le panneau
         
-        # On crée un conteneur spécial
         with st.container():
-            # Cette div vide sert de "marqueur" pour le CSS ci-dessus
-            st.markdown('<div class="blue-panel"></div>', unsafe_allow_html=True)
+            # Le marqueur pour appliquer le style du petit panneau
+            st.markdown('<div class="login-card"></div>', unsafe_allow_html=True)
             st.markdown('<div class="login-title">Connexion</div>', unsafe_allow_html=True)
 
             email = st.text_input("Email", placeholder="votre@email.com")
             password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
             
-            if st.button("Se connecter"):
+            st.write(" ") # Petit espace
+            
+            if st.button("Se connecter", type="primary"):
                 roles_tables = {
                     "Etudiant": "etudiants", "Professeur": "professeurs",
                     "Chef": "chefs_departement", "Admin": "administrateurs",
@@ -698,12 +694,13 @@ if st.session_state.step == "login":
                 else:
                     st.error("Identifiants incorrects")
 
-            # Liens Inscription / MDP Oublié
-            st.write("---")
+            st.markdown("<hr style='opacity: 0.1'>", unsafe_allow_html=True)
+            
+            # Boutons du bas bien alignés
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("Mot de passe oublié ?", key="forgot"):
-                    st.toast("Contactez l'administrateur.")
+                if st.button("MDP oublié ?", key="forgot"):
+                    st.toast("Contactez l'Admin.")
             with c2:
                 if st.button("Créer un compte", key="signup"):
                     st.session_state.step = "signup"
