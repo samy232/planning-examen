@@ -683,6 +683,9 @@ elif st.session_state.step == "new_password":
 # ==================================================
 # DASHBOARDS ÉTENDUS (modifications demandées)
 # ==================================================
+# ==================================================
+# DASHBOARDS ÉTENDUS (modifications demandées)
+# ==================================================
 elif st.session_state.step == "dashboard":
 
     role = st.session_state.role
@@ -690,34 +693,51 @@ elif st.session_state.step == "dashboard":
     user_data = None
 
     if role == "Etudiant":
-        cursor.execute("""
-            SELECT e.*, f.nom AS formation_nom 
-            FROM etudiants e 
-            LEFT JOIN formations f ON e.formation_id = f.id 
-            WHERE e.email = %s
-        """, (email,))
-        user_data = cursor.fetchone()
-    elif role == "Professeur":
-        cursor.execute("""
-            SELECT p.*, d.nom AS dept_nom 
-            FROM professeurs p 
-            LEFT JOIN departements d ON p.dept_id = d.id 
-            WHERE p.email = %s
-        """, (email,))
-        user_data = cursor.fetchone()
-    elif role == "Chef":
-        cursor.execute("""
-            SELECT c.*, d.nom AS dept_nom, c.dept_id
-            FROM chefs_departement c
-            LEFT JOIN departements d ON c.dept_id = d.id
-            WHERE c.email = %s
-        """, (email,))
-        user_data = cursor.fetchone()
-    elif role in ("Vice-doyen", "Admin", "Administrateur examens"):
-        cursor.execute("SELECT * FROM administrateurs WHERE email = %s", (email,))
-        user_data = cursor.fetchone()
+        result = supabase.table("etudiants")\
+            .select("*, formations(nom)")\
+            .eq("email", email)\
+            .execute()
+        users = result.data
+        if users:
+            user_data = users[0]
+            # Supabase nested fields are like user_data['formations']['nom']
+            if 'formations' in user_data and user_data['formations']:
+                user_data['formation_nom'] = user_data['formations'][0]['nom']
 
-    # Sidebar
+    elif role == "Professeur":
+        result = supabase.table("professeurs")\
+            .select("*, departements(nom)")\
+            .eq("email", email)\
+            .execute()
+        users = result.data
+        if users:
+            user_data = users[0]
+            if 'departements' in user_data and user_data['departements']:
+                user_data['dept_nom'] = user_data['departements'][0]['nom']
+
+    elif role == "Chef":
+        result = supabase.table("chefs_departement")\
+            .select("*, departements(nom)")\
+            .eq("email", email)\
+            .execute()
+        users = result.data
+        if users:
+            user_data = users[0]
+            if 'departements' in user_data and user_data['departements']:
+                user_data['dept_nom'] = user_data['departements'][0]['nom']
+
+    elif role in ("Vice-doyen", "Admin", "Administrateur examens"):
+        result = supabase.table("administrateurs")\
+            .select("*")\
+            .eq("email", email)\
+            .execute()
+        users = result.data
+        if users:
+            user_data = users[0]
+
+    # ======================
+    # SIDEBAR
+    # ======================
     with st.sidebar:
         st.title("📌 Menu")
         st.markdown("---")
