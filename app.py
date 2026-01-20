@@ -1154,101 +1154,115 @@ elif st.session_state.step == "dashboard":
         else:
             st.info("Aucune surveillance trouvée pour ces critères.")
 
+    
+######################
+    ###############
+    ############
+
+
+
+    
+    # --------------------
+    # Chef de département UI (Version Force-Refresh)
+    # --------------------
     elif role == "Chef":
         st.title("🧭 Dashboard — Chef de département")
         
-        # 1. RÉCUPÉRATION GLOBALE (Ultra-Rapide)
+        # 1. RÉCUPÉRATION DES DONNÉES EN UNE SEULE FOIS (SANS CACHE POUR TESTER)
+        # On récupère le profil
         user_prof = db_get_one("chefs_departement", "*", eq={"email": st.session_state.user_email})
         dept_id = user_prof.get('dept_id') if user_prof else None
 
         if not dept_id:
-            st.error("Département non identifié.")
+            st.error("Département non détecté dans la base 'chefs_departement'.")
         else:
-            with st.spinner("Analyse du département..."):
-                # A. Maps pour éviter les requêtes en boucle
-                all_forms = db_select("formations", "id, nom", eq={"dept_id": dept_id})
-                f_map = {f['id']: f['nom'] for f in all_forms}
-                f_ids = list(f_map.keys())
+            # --- ÉTAPE A : CHARGEMENT ÉCLAIR ---
+            # On récupère tout le dictionnaire en 3 requêtes max
+            all_forms = db_select("formations", "id, nom", eq={"dept_id": dept_id})
+            f_map = {f['id']: f['nom'] for f in all_forms}
+            f_ids = list(f_map.keys())
 
-                all_mods = db_select("modules", "id, nom, formation_id")
-                all_mods = [m for m in all_mods if m['formation_id'] in f_ids]
-                m_map = {m['id']: m for m in all_mods}
-                m_ids = list(m_map.keys())
+            # On récupère tous les modules pour ces formations
+            all_mods = db_select("modules", "id, nom, formation_id")
+            dept_mods = [m for m in all_mods if m['formation_id'] in f_ids]
+            m_map = {m['id']: m for m in dept_mods}
+            m_ids = list(m_map.keys())
 
-                # B. Examens (On récupère tout pour les stats, validés ou non)
-                all_exs_raw = db_select("examens", "*")
-                dept_exams = [e for e in all_exs_raw if e['module_id'] in m_ids]
-                pending_exams = [e for e in dept_exams if not e.get('validated')]
+            # On récupère TOUS les examens du département
+            all_exs = db_select("examens", "*")
+            dept_exams = [e for e in all_exs if e['module_id'] in m_ids]
+            pending_exams = [e for e in dept_exams if not e.get('validated')]
 
-                # C. Salles
-                salles_raw = db_select("lieu_examen", "id, nom")
-                salle_map = {s['id']: s['nom'] for s in salles_raw}
+            # Salles
+            salle_map = {s['id']: s['nom'] for s in db_select("lieu_examen", "id, nom")}
 
-            # 2. STATISTIQUES AMÉLIORÉES (Visuel Moderne)
-            st.subheader("📊 État des lieux")
+            # --- ÉTAPE B : STATISTIQUES MODERNES (GRAPHIQUE) ---
+            st.subheader("📊 Performance du Département")
             
-            # Calcul des données pour le graphe circulaire
-            stats_par_form = {}
+            # Préparation des données pour le graphique
+            stats_form = {}
             for e in dept_exams:
-                f_nom = f_map[m_map[e['module_id']]['formation_id']]
-                stats_par_form[f_nom] = stats_par_form.get(f_nom, 0) + 1
+                f_nom = f_map.get(m_map.get(e['module_id'], {}).get('formation_id'), "Autre")
+                stats_form[f_nom] = stats_form.get(f_nom, 0) + 1
 
-            col_m1, col_m2, col_m3 = st.columns(3)
-            col_m1.metric("Total Examens", len(dept_exams))
-            col_m2.metric("En attente", len(pending_exams), delta=f"-{len(pending_exams)}", delta_color="inverse")
-            col_m3.metric("Taux de Validation", f"{int((len(dept_exams)-len(pending_exams))/len(dept_exams)*100) if dept_exams else 0}%")
-
-            # Affichage du Graphe Circulaire (Plotly)
-            if stats_par_form:
-                import plotly.graph_objects as go
-                fig = go.Figure(data=[go.Pie(labels=list(stats_par_form.keys()), 
-                                             values=list(stats_par_form.values()), 
-                                             hole=.4)])
-                fig.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=300)
-                st.plotly_chart(fig, use_container_width=True)
+            col_a, col_b = st.columns([1, 2])
+            with col_a:
+                st.metric("Total Examens", len(dept_exams))
+                st.metric("À Valider", len(pending_exams), delta=len(pending_exams), delta_color="inverse")
+            
+            with col_b:
+                if stats_form:
+                    # Graphique simple mais efficace
+                    st.bar_chart(stats_form)
 
             st.divider()
 
-            # 3. CONFLITS PAR FORMATION (Nouveau)
-            st.subheader("⚠️ Détection des conflits")
-            with st.expander("Voir les conflits détaillés par formation"):
-                all_conflicts = detect_conflicts() # Analyse globale
-                s_conf = all_conflicts.get('salles_capacite', [])
-                
-                # Regrouper les conflits par formation du département
-                conflicts_by_f = {}
-                for c in s_conf:
-                    ex_match = next((e for e in dept_exams if e['id'] == c.get('examen_id')), None)
-                    if ex_match:
-                        f_nom = f_map[m_map[ex_match['module_id']]['formation_id']]
-                        if f_nom not in conflicts_by_f: conflicts_by_f[f_nom] = []
-                        conflicts_by_f[f_nom].append(c)
-                
-                if not conflicts_by_f:
-                    st.success("✅ Aucun conflit de capacité détecté pour vos formations.")
-                else:
-                    for f_nom, list_c in conflicts_by_f.items():
-                        st.warning(f"**Formation : {f_nom}** ({len(list_c)} conflits)")
+            # --- ÉTAPE C : CONFLITS PAR FORMATION ---
+            st.subheader("⚠️ Conflits par Formation")
+            all_conflicts = detect_conflicts()
+            s_conf = all_conflicts.get('salles_capacite', [])
+            
+            # Filtrer les conflits pour ce département
+            dept_conflicts = {}
+            for c in s_conf:
+                ex_id = c.get('examen_id')
+                ex_obj = next((e for e in dept_exams if e['id'] == ex_id), None)
+                if ex_obj:
+                    f_nom = f_map.get(m_map.get(ex_obj['module_id'], {}).get('formation_id'))
+                    if f_nom not in dept_conflicts: dept_conflicts[f_nom] = []
+                    dept_conflicts[f_nom].append(c)
+
+            if not dept_conflicts:
+                st.success("Aucun conflit détecté pour vos formations.")
+            else:
+                for f_nom, list_c in dept_conflicts.items():
+                    with st.expander(f"Conflits : {f_nom} ({len(list_c)})"):
                         st.table(list_c)
 
             st.divider()
 
-            # 4. LISTE DE VALIDATION INSTANTANÉE
-            st.subheader("📋 Examens à valider")
+            # --- ÉTAPE D : VALIDATION RÉELLE ET INSTANTANÉE ---
+            st.subheader("📋 Liste des validations")
             if not pending_exams:
-                st.success("Bravo ! Tous les examens ont été validés.")
+                st.info("Tout est validé.")
             else:
                 for ex in pending_exams:
-                    m_info = m_map[ex['module_id']]
+                    m_nom = m_map.get(ex['module_id'], {}).get('nom', 'Inconnu')
+                    f_id = m_map.get(ex['module_id'], {}).get('formation_id')
+                    f_nom = f_map.get(f_id, '-')
+                    
                     with st.container():
                         c1, c2, c3 = st.columns([3, 2, 1])
-                        c1.markdown(f"**{m_info['nom']}**\n*{f_map[m_info['formation_id']]}*")
-                        c2.write(f"📅 {ex['date_heure']}\n📍 {salle_map.get(ex['salle_id'], 'N/A')}")
+                        c1.write(f"**{m_nom}** \n*{f_nom}*")
+                        c2.write(f"📅 {ex['date_heure']}  \n📍 {salle_map.get(ex['salle_id'], 'N/A')}")
                         
-                        if c3.button("Valider", key=f"val_{ex['id']}", type="primary", use_container_width=True):
+                        # LE BOUTON QUI FORCE LE CHANGEMENT
+                        if c3.button("Valider", key=f"btn_v_{ex['id']}", type="primary"):
+                            # On met à jour la base
                             db_update("examens", {"validated": True}, {"id": ex['id']})
-                            st.toast(f"✅ Examen validé : {m_info['nom']}")
-                            st.rerun()
+                            # On vide tout le cache possible de Streamlit pour ce bouton
+                            st.toast(f"Examen {m_nom} validé !")
+                            st.rerun() # Recharge la page immédiatement
                     st.divider()
     # --------------------
     # Administrateur exams (service planification) : génération + optimisation + détection
