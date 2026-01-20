@@ -590,8 +590,9 @@ elif st.session_state.step == "forgot_email":
     if st.button("Envoyer le code"):
         found = False
         for table in tables_reset:
-            cursor.execute(f"SELECT * FROM {table} WHERE email=%s", (reset_email,))
-            if cursor.fetchone():
+            result = supabase.table(table).select("*").eq("email", reset_email).execute()
+            users = result.data
+            if users:
                 found = True
                 st.session_state.reset_email = reset_email
                 st.session_state.reset_code = send_email_code(
@@ -661,16 +662,10 @@ elif st.session_state.step == "new_password":
         else:
             updated_any = False
             for table in tables_reset:
-                cursor.execute(
-                    f"SELECT * FROM {table} WHERE email=%s",
-                    (st.session_state.reset_email,)
-                )
-                if cursor.fetchone():
-                    cursor.execute(
-                        f"UPDATE {table} SET password=%s WHERE email=%s",
-                        (new_pass, st.session_state.reset_email)
-                    )
-                    conn.commit()
+                result = supabase.table(table).select("*").eq("email", st.session_state.reset_email).execute()
+                users = result.data
+                if users:
+                    supabase.table(table).update({"password": new_pass}).eq("email", st.session_state.reset_email).execute()
                     updated_any = True
 
             if updated_any:
@@ -681,10 +676,7 @@ elif st.session_state.step == "new_password":
                 st.error("Impossible de mettre à jour — email introuvable.")
 
 # ==================================================
-# DASHBOARDS ÉTENDUS (modifications demandées)
-# ==================================================
-# ==================================================
-# DASHBOARDS ÉTENDUS (modifications demandées)
+# DASHBOARDS ÉTENDUS
 # ==================================================
 elif st.session_state.step == "dashboard":
 
@@ -700,7 +692,6 @@ elif st.session_state.step == "dashboard":
         users = result.data
         if users:
             user_data = users[0]
-            # Supabase nested fields are like user_data['formations']['nom']
             if 'formations' in user_data and user_data['formations']:
                 user_data['formation_nom'] = user_data['formations'][0]['nom']
 
@@ -727,31 +718,26 @@ elif st.session_state.step == "dashboard":
                 user_data['dept_nom'] = user_data['departements'][0]['nom']
 
     elif role in ("Vice-doyen", "Admin", "Administrateur examens"):
-        result = supabase.table("administrateurs")\
-            .select("*")\
-            .eq("email", email)\
-            .execute()
+        result = supabase.table("administrateurs").select("*").eq("email", email).execute()
         users = result.data
         if users:
             user_data = users[0]
 
-    # ======================
-    # SIDEBAR
-    # ======================
+    # --------------------
+    # Sidebar
+    # --------------------
     with st.sidebar:
         st.title("📌 Menu")
         st.markdown("---")
         if user_data:
             st.subheader("👤 Mon Profil")
-            if 'nom' in user_data:
-                st.write(f"**Nom :** {user_data.get('nom','')}")
-            if 'prenom' in user_data:
-                st.write(f"**Prénom :** {user_data.get('prenom','')}")
+            for key in ["nom","prenom","email"]:
+                if key in user_data:
+                    st.write(f"**{key.capitalize()} :** {user_data[key]}")
             if role == "Etudiant" and 'formation_nom' in user_data:
                 st.write(f"**Formation :** {user_data.get('formation_nom')}")
             if role == "Professeur" and 'dept_nom' in user_data:
                 st.write(f"**Département :** {user_data.get('dept_nom')}")
-            st.write(f"**Email :** {user_data.get('email','')}")
 
         for _ in range(12): st.write("")
 
