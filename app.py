@@ -648,23 +648,22 @@ if st.session_state.step == "login":
             border: none;
             border-radius: 10px;
             height: 50px;
-            width: 400%;
+            width: 100%;
             font-weight: bold;
             margin-top: 15px;
         }
 
-        /* Bouton Login */
-        div.stButton1 > button:first-child {
+        /* ----- STYLE DU BOUTON LOGIN UNIQUEMENT ----- */
+        .login-container div.stButton > button {
             background-color: #0085FF !important;
             color: white !important;
             border: none;
             border-radius: 10px;
             height: 50px;
-            width: 300%;
+            width: 500%;
             font-weight: bold;
             margin-top: 15px;
-        }
-
+}
 
         /* Liens secondaires */
         .secondary-links {
@@ -689,40 +688,47 @@ if st.session_state.step == "login":
             email = st.text_input("Email", placeholder="votre@email.com")
             password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
             
-            if st.button("Se connecter"):
-                roles_tables = {
-                    "Etudiant": "etudiants", "Professeur": "professeurs",
-                    "Chef": "chefs_departement", "Admin": "administrateurs",
-                    "Vice-doyen": "vice_doyens", "Administrateur examens": "administrateurs"
-                }
+            with st.container():
+    st.markdown('<div class="login-container"></div>', unsafe_allow_html=True)
 
-                found_user = False
-                for role_name, table_name in roles_tables.items():
-                    users = db_select(table_name, "*", eq={"email": email, "password": password})
-                    if users:
-                        st.session_state.user_email = email
-                        st.session_state.role = role_name
-                        st.session_state.step = "dashboard"
-                        found_user = True
-                        break
+    if st.button("Se connecter"):
+        roles_tables = {
+            "Etudiant": "etudiants", 
+            "Professeur": "professeurs",
+            "Chef": "chefs_departement", 
+            "Admin": "administrateurs",
+            "Vice-doyen": "vice_doyens", 
+            "Administrateur examens": "administrateurs"
+        }
 
-                if found_user:
-                    st.success(f"Connecté en tant que {st.session_state.role}")
-                    st.rerun()
-                else:
-                    st.error("Identifiants incorrects")
+        found_user = False
+        for role_name, table_name in roles_tables.items():
+            users = db_select(table_name, "*", eq={"email": email, "password": password})
+            if users:
+                st.session_state.user_email = email
+                st.session_state.role = role_name
+                st.session_state.step = "dashboard"
+                found_user = True
+                break
+
+        if found_user:
+            st.success(f"Connecté en tant que {st.session_state.role}")
+            st.rerun()
+        else:
+            st.error("Identifiants incorrects")
+
 
             # Liens Inscription / MDP Oublié
             st.write("---")
             c1, c2 = st.columns(2)
             with c1:
-                if st.button1("Mot de passe oublié ?", key="forgot"):
+                if st.button("Mot de passe oublié ?", key="forgot"):
                     st.session_state.step = "forgot_email"
                     st.rerun()
             with c2:
-                if st.button1("Nouvelle inscription", key="signup"):
+                if st.button("Nouvelle inscription", key="signup"):
                     st.session_state.step = "choose_role"
-                    st.rerun()
+                    st.rerun()c
 # ==================================================
 # PAGE 2 — CHOIX DU RÔLE
 # ==================================================
