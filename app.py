@@ -931,7 +931,7 @@ elif st.session_state.step == "dashboard":
                 st.info("aucun conflit détecté")
 
 # --------------------
-# Administrateur exams (service planification)
+# Administrateur exams (service planification) : génération + optimisation + détection
 # --------------------
 elif role in ("Admin", "Administrateur examens"):
     st.title("🛠️ Service Planification — Administrateur examens")
@@ -964,9 +964,9 @@ elif role in ("Admin", "Administrateur examens"):
                 tic = time.time()
                 report, conflicts = generate_timetable(cursor, conn, start_str, end_str, force=False)
                 duration = time.time() - tic
-                st.success(f"✅ Génération terminée en {duration:.1f}s")
+                st.success(f"✅ Génération complète terminée en {duration:.1f} secondes !")
                 
-                visible_conflicts = {k:v for k,v in conflicts.items() if k not in excluded_keys}
+                visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
                 total_visible = sum(len(v) for v in visible_conflicts.values())
                 if total_visible == 0:
                     st.info("Aucun conflit affiché pour cette analyse.")
@@ -986,13 +986,13 @@ elif role in ("Admin", "Administrateur examens"):
                 tic = time.time()
                 report, conflicts = optimize_resources(cursor, conn, start_str, end_str)
                 duration = time.time() - tic
-                st.success(f"✅ Optimisation terminée en {report.get('duration_seconds', duration):.1f}s")
+                st.success(f"✅ Optimisation terminée en {report.get('duration_seconds', duration):.1f} secondes.")
                 
                 st.write("Améliorations estimées :")
                 for k, v in report.get('improvements', {}).items():
                     st.write(f"- {k.replace('_',' ')} : {v}")
 
-                visible_conflicts = {k:v for k,v in conflicts.items() if k not in excluded_keys}
+                visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
                 total_visible = sum(len(v) for v in visible_conflicts.values())
                 if total_visible == 0:
                     st.info("Aucun conflit affiché après optimisation.")
@@ -1012,13 +1012,13 @@ elif role in ("Admin", "Administrateur examens"):
             conflicts = detect_conflicts(cursor, start_str, end_str)
             duration = time.time() - tic
 
-            visible_conflicts = {k:v for k,v in conflicts.items() if k not in excluded_keys}
+            visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
             total_visible = sum(len(v) for v in visible_conflicts.values())
 
             if total_visible == 0:
-                st.success(f"✅ Analyse terminée en {duration:.1f}s — Aucun conflit affiché pour les catégories visibles.")
+                st.success(f"✅ Analyse terminée en {duration:.1f} secondes — Aucun conflit affiché pour les catégories visibles.")
             else:
-                st.warning(f"⚠️ Analyse terminée en {duration:.1f}s — {total_visible} conflit(s) affiché(s).")
+                st.warning(f"⚠️ Analyse terminée en {duration:.1f} secondes — {total_visible} conflit(s) affiché(s).")
                 st.markdown("**Résumé des conflits affichés**")
                 for k, rows in visible_conflicts.items():
                     st.write(f"- {k.replace('_',' ')} : {len(rows)}")
