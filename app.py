@@ -641,19 +641,21 @@ if st.session_state.step == "login":
             color: white !important;
         }
 
-        /* Boutons */
-        div.stButton > button {
-            width: 100% !important;
-            border-radius: 10px !important;
-        }
-
-        /* Bouton Login (Le premier) */
+        /* Bouton Login */
         div.stButton > button:first-child {
             background-color: #0085FF !important;
             color: white !important;
             border: none;
+            border-radius: 10px;
             height: 48px;
+            width: 100%;
             font-weight: bold;
+            margin-top: 15px;
+        }
+
+        /* Liens secondaires */
+        .secondary-links {
+            text-align: center;
             margin-top: 15px;
         }
         </style>
