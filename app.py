@@ -598,91 +598,56 @@ for key, value in defaults.items():
 # PAGE 1 — LOGIN + INSCRIPTION
 # ==================================================
 # ==================================================
-# PAGE 1 — LOGIN + INSCRIPTION (VERSION PREMIUM)
+# PAGE 1 — LOGIN + INSCRIPTION (VERSION PRO SIDE-BY-SIDE)
 # ==================================================
 if st.session_state.step == "login":
-
-    # --- CSS CUSTOM POUR LOOK MODERNE ---
+    
+    # Suppression des marges par défaut de Streamlit pour un look "Full Screen"
     st.markdown("""
         <style>
-        /* Fond d'écran global */
-        .stApp {
-            background: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), 
-                        url("https://images.unsplash.com/photo-1501504905252-473c47e087f8?q=80&w=1974&auto=format&fit=crop");
-            background-size: cover;
-        }
-
-        /* Conteneur de login */
-        .login-container {
-            background-color: rgba(255, 255, 255, 0.95);
-            padding: 3rem;
-            border-radius: 25px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
-            text-align: center;
-        }
-
-        /* Champs de texte */
-        .stTextInput input {
-            border-radius: 12px !important;
-            border: 1px solid #ddd !important;
-            padding: 10px !important;
-        }
-
-        /* Bouton Login */
-        div.stButton > button:first-child {
-            background-color: #0085FF !important;
-            color: white !important;
-            width: 100%;
-            border-radius: 12px;
-            height: 50px;
-            font-size: 18px;
-            font-weight: bold;
-            border: none;
-            transition: 0.3s;
-        }
-        
-        div.stButton > button:first-child:hover {
-            background-color: #0066CC !important;
-            transform: translateY(-2px);
-        }
-
-        /* Liens secondaires */
-        .footer-links {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 20px;
-            font-size: 14px;
-        }
-        
-        .footer-links a {
-            color: #0085FF;
-            text-decoration: none;
-        }
+            .block-container {padding: 0rem !important;}
+            [data-testid="stHeader"] {display: none;}
+            .stApp {background-color: white;}
+            
+            /* Style des champs de saisie */
+            .stTextInput input {
+                background-color: #F0F2F6 !important;
+                border: none !important;
+                border-radius: 10px !important;
+                height: 45px;
+            }
         </style>
     """, unsafe_allow_html=True)
 
-    # --- LAYOUT CENTRALISÉ ---
-    empty_l, col_main, empty_r = st.columns([1, 2, 1])
+    # Division de l'écran en deux colonnes
+    col_img, col_form = st.columns([1.2, 1])
 
-    with col_main:
-        st.markdown('<div class="login-container">', unsafe_allow_html=True)
+    with col_img:
+        # Image de gauche qui prend toute la hauteur
+        st.image("https://images.unsplash.com/photo-1434030216411-0b793f4b4173?q=80&w=2070&auto=format&fit=crop", 
+                 use_container_width=True)
+
+    with col_form:
+        # On ajoute du padding pour centrer le formulaire verticalement
+        st.markdown("<div style='padding: 100px 50px;'>", unsafe_allow_html=True)
         
-        st.markdown("<h1 style='color: #1E1E1E; margin-bottom: 0;'>Welcome Back!</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='color: #666; margin-bottom: 2rem;'>Connectez-vous à votre espace EDT</p>", unsafe_allow_html=True)
+        st.markdown("<h1 style='color: #1E1E1E; font-size: 35px; font-weight: 800;'>Welcome Back!</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #718096; margin-bottom: 40px;'>Login to your EDT Account</p>", unsafe_allow_html=True)
 
         # Formulaire
-        email = st.text_input("Email", placeholder="votre@email.com", label_visibility="collapsed")
-        password = st.text_input("Mot de passe", type="password", placeholder="Mot de passe", label_visibility="collapsed")
+        email = st.text_input("Email", placeholder="example@univ.dz")
+        password = st.text_input("Password", type="password", placeholder="••••••••")
         
-        st.write("") # Espacement
+        st.markdown("<br>", unsafe_allow_html=True)
 
-        if st.button("Se connecter"):
+        # Bouton de connexion stylé
+        if st.button("Login", use_container_width=True, type="primary"):
             roles_tables = {
                 "Etudiant": "etudiants", "Professeur": "professeurs",
                 "Chef": "chefs_departement", "Admin": "administrateurs",
                 "Vice-doyen": "vice_doyens", "Administrateur examens": "administrateurs"
             }
-
+            
             found_user = False
             for role_name, table_name in roles_tables.items():
                 users = db_select(table_name, "*", eq={"email": email, "password": password})
@@ -692,25 +657,26 @@ if st.session_state.step == "login":
                     st.session_state.step = "dashboard"
                     found_user = True
                     break
-
+            
             if found_user:
-                st.success("Accès autorisé...")
                 st.rerun()
             else:
-                st.error("Identifiants invalides")
+                st.error("Email ou mot de passe incorrect")
 
-        # --- LIENS INSCRIPTION & MOT DE PASSE OUBLIÉ ---
-        col_link1, col_link2 = st.columns(2)
-        with col_link1:
-            if st.button("📝 Créer un compte", key="btn_signup", help="S'inscrire"):
-                # Ici tu peux changer st.session_state.step = "signup" si tu as une page dédiée
-                st.info("Redirection vers l'inscription...")
+        # Liens du bas
+        st.markdown("<br>", unsafe_allow_html=True)
+        c_forgot, c_signup = st.columns(2)
         
-        with col_link2:
-            if st.button("🔑 Mot de passe oublié ?", key="btn_forgot"):
-                st.warning("Contactez l'administrateur pour réinitialiser.")
+        with c_forgot:
+            if st.button("Forgot Password?", key="forgot", help="Cliquez pour réinitialiser"):
+                st.toast("Contactez le service informatique.")
+        
+        with c_signup:
+            if st.button("Create Account!", key="signup"):
+                st.session_state.step = "signup"
+                st.rerun()
 
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 # ==================================================
 # PAGE 2 — CHOIX DU RÔLE
 # ==================================================
