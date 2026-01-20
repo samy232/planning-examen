@@ -296,34 +296,37 @@ if st.session_state.step == "login":
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        if st.button("Se connecter"):
-            roles_tables = {
-                "Etudiant": "etudiants",
-                "Professeur": "professeurs",
-                "Chef": "chefs_departement",
-                "Admin": "administrateurs",
-                "Vice-doyen": "vice_doyens",
-                "Administrateur examens": "administrateurs"
-            }
+if st.button("Se connecter"):
+    roles_tables = {
+        "Etudiant": "etudiants",
+        "Professeur": "professeurs",
+        "Chef": "chefs_departement",
+        "Admin": "administrateurs",
+        "Vice-doyen": "vice_doyens",
+        "Administrateur examens": "administrateurs"
+    }
 
-            found_user = False
-            for r, table in roles_tables.items():
-                cursor.execute(
-                    f"SELECT * FROM {table} WHERE email=%s AND password=%s",
-                    (email, password)
-                )
-                user = cursor.fetchone()
-                if user:
-                    st.session_state.user_email = email
-                    st.session_state.role = r
-                    st.session_state.step = "dashboard"
-                    found_user = True
-                    break
+    found_user = False
+    for r, table in roles_tables.items():
+        result = supabase.table(table)\
+            .select("*")\
+            .eq("email", email)\
+            .eq("password", password)\
+            .execute()
+        users = result.data
 
-            if found_user:
-                st.rerun()
-            else:
-                st.error("Email ou mot de passe incorrect")
+        if users:  # non-empty list = user found
+            st.session_state.user_email = email
+            st.session_state.role = r
+            st.session_state.step = "dashboard"
+            found_user = True
+            break
+
+    if found_user:
+        st.rerun()
+    else:
+        st.error("Email ou mot de passe incorrect")
+
 
     with col2:
         if st.button("Mot de passe oublié ?"):
