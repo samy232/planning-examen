@@ -613,7 +613,7 @@ if st.session_state.step == "login":
         /* LE CONTENEUR UNIQUE (Dégradé Bleu) */
         div[data-testid="stVerticalBlock"] > div:has(div.main-panel) {
             background: linear-gradient(135deg, #1E3A8A 0%, #111827 100%) !important;
-            padding: 50px !important;
+            padding: 30px !important;
             border-radius: 30px !important;
             box-shadow: 0px 15px 50px rgba(0, 133, 255, 0.3) !important;
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
