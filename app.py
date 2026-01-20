@@ -689,33 +689,33 @@ if st.session_state.step == "login":
             password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
             
             with st.container():
-    st.markdown('<div class="login-container"></div>', unsafe_allow_html=True)
+                st.markdown('<div class="login-container"></div>', unsafe_allow_html=True)
 
-    if st.button("Se connecter"):
-        roles_tables = {
-            "Etudiant": "etudiants", 
-            "Professeur": "professeurs",
-            "Chef": "chefs_departement", 
-            "Admin": "administrateurs",
-            "Vice-doyen": "vice_doyens", 
-            "Administrateur examens": "administrateurs"
-        }
+                if st.button("Se connecter"):
+                    roles_tables = {
+                        "Etudiant": "etudiants", 
+                        "Professeur": "professeurs",
+                        "Chef": "chefs_departement", 
+                        "Admin": "administrateurs",
+                        "Vice-doyen": "vice_doyens", 
+                        "Administrateur examens": "administrateurs"
+                    }
 
-        found_user = False
-        for role_name, table_name in roles_tables.items():
-            users = db_select(table_name, "*", eq={"email": email, "password": password})
-            if users:
-                st.session_state.user_email = email
-                st.session_state.role = role_name
-                st.session_state.step = "dashboard"
-                found_user = True
-                break
+                found_user = False
+                for role_name, table_name in roles_tables.items():
+                    users = db_select(table_name, "*", eq={"email": email, "password": password})
+                    if users:
+                        st.session_state.user_email = email
+                        st.session_state.role = role_name
+                        st.session_state.step = "dashboard"
+                        found_user = True
+                    break
 
-        if found_user:
-            st.success(f"Connecté en tant que {st.session_state.role}")
-            st.rerun()
-        else:
-            st.error("Identifiants incorrects")
+                if found_user:
+                    st.success(f"Connecté en tant que {st.session_state.role}")
+                    st.rerun()
+                else:
+                    st.error("Identifiants incorrects")
 
 
             # Liens Inscription / MDP Oublié
