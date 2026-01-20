@@ -595,52 +595,122 @@ for key, value in defaults.items():
         st.session_state[key] = value
 
 # ==================================================
-# PAGE 1 — LOGIN + INSCRIPTION
+# PAGE 1 — LOGIN (CONTENEUR UNIQUE DÉGRADÉ)
 # ==================================================
-# --- CSS POUR SUPPRIMER LE CONTENEUR EXTÉRIEUR ---
-st.markdown("""
-    <style>
-    /* 1. On rend le fond de la page noir pur */
-    .stApp {
-        background-color: #000000 !important;
-    }
+if st.session_state.step == "login":
 
-    /* 2. ON FORCE TOUS LES PARENTS À ÊTRE TRANSPARENTS */
-    /* Cela enlève la 'boîte' grise/bleue qui entoure ton panneau */
-    [data-testid="stVerticalBlock"] > div {
-        background-color: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-    }
-
-    /* 3. TON SEUL ET UNIQUE PANNEAU (Le vrai) */
-    /* On utilise un ID spécifique pour ne cibler QUE ton conteneur */
-    div.main-panel-container {
-        background: linear-gradient(135deg, #1E3A8A 0%, #111827 100%) !important;
-        padding: 50px !important;
-        border-radius: 30px !important;
-        box-shadow: 0px 15px 50px rgba(0, 133, 255, 0.3) !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        margin-top: 50px;
-        display: block;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# --- STRUCTURE DANS LE CODE ---
-_, col_center, _ = st.columns([0.5, 1, 0.5])
-
-with col_center:
-    # On utilise st.container avec un seul markdown pour TOUT le panneau
-    # On met le HTML du titre et le marqueur dans le même bloc
+    # --- CSS POUR LE PANNEAU UNIQUE ---
     st.markdown("""
-        <div class="main-panel-container">
-            <h1 style='color: white; text-align: center; font-size: 32px; margin-bottom: 20px;'>Connexion</h1>
-        </div>
+        <style>
+        /* Fond de la page en noir */
+        .stApp {
+            background-color: #000000 !important;
+        }
+
+        /* LE CONTENEUR UNIQUE (Dégradé Bleu) */
+        div[data-testid="stVerticalBlock"] > div:has(div.main-panel) {
+            background: linear-gradient(135deg, #1E3A8A 0%, #111827 100%) !important;
+            padding: 50px !important;
+            border-radius: 30px !important;
+            box-shadow: 0px 15px 50px rgba(0, 133, 255, 0.3) !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            margin-top: 50px;
+        }
+
+        /* Style des textes et titres */
+        .panel-title {
+            color: white;
+            text-align: center;
+            font-size: 35px;
+            font-weight: 800;
+            margin-bottom: 30px;
+            font-family: 'sans-serif';
+        }
+
+        /* Inputs (Email/MDP) */
+        .stTextInput input {
+            background-color: rgba(255, 255, 255, 0.08) !important;
+            color: white !important;
+            border: 1px solid rgba(255, 255, 255, 0.2) !important;
+            border-radius: 12px !important;
+            height: 50px !important;
+        }
+        
+        /* Labels des inputs */
+        .stTextInput label {
+            color: rgba(255, 255, 255, 0.8) !important;
+            font-weight: bold !important;
+        }
+
+        /* BOUTON LOGIN (Bleu Clair) */
+        div.stButton > button[kind="primary"] {
+            background-color: #0085FF !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 12px !important;
+            height: 55px !important;
+            width: 100% !important;
+            font-size: 18px !important;
+            font-weight: bold !important;
+            margin-top: 20px;
+        }
+
+        /* BOUTONS SECONDAIRES (Inscription / Oubli) */
+        div.stButton > button[kind="secondary"] {
+            background-color: rgba(255, 255, 255, 0.05) !important;
+            color: white !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            border-radius: 10px !important;
+            width: 100% !important;
+        }
+        </style>
     """, unsafe_allow_html=True)
-    
-    # Pour que les inputs soient dedans, on utilise cette astuce :
-    # On place les éléments Streamlit juste après, le CSS s'occupera du reste.
+
+    # --- MISE EN PAGE ---
+    _, col_center, _ = st.columns([0.6, 1, 0.6])
+
+    with col_center:
+        with st.container():
+            # Marqueur pour le CSS
+            st.markdown('<div class="main-panel"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="panel-title">Connexion</div>', unsafe_allow_html=True)
+
+            email = st.text_input("Adresse Email", placeholder="votre@email.com")
+            password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
+            
+            # Bouton principal
+            if st.button("Se connecter", type="primary"):
+                roles_tables = {
+                    "Etudiant": "etudiants", "Professeur": "professeurs",
+                    "Chef": "chefs_departement", "Admin": "administrateurs",
+                    "Vice-doyen": "vice_doyens", "Administrateur examens": "administrateurs"
+                }
+
+                found_user = False
+                for role_name, table_name in roles_tables.items():
+                    users = db_select(table_name, "*", eq={"email": email, "password": password})
+                    if users:
+                        st.session_state.user_email = email
+                        st.session_state.role = role_name
+                        st.session_state.step = "dashboard"
+                        found_user = True
+                        break
+
+                if found_user:
+                    st.rerun()
+                else:
+                    st.error("Email ou mot de passe incorrect")
+
+            # Espace et boutons du bas
+            st.write("##") 
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("🔑 MDP oublié ?", key="forgot_btn"):
+                    st.toast("Contactez l'administration.")
+            with c2:
+                if st.button("📝 Inscription", key="signup_btn"):
+                    st.session_state.step = "signup"
+                    st.rerun()
 # ==================================================
 # PAGE 2 — CHOIX DU RÔLE
 # ==================================================
