@@ -703,7 +703,7 @@ if st.session_state.step == "login":
             st.write("---")
             
             # --- BOUTONS SECONDAIRES (EUX RESTENT EN COLONNES) ---
-            c1, c2 = st.columns(2)
+            c1, c2 = st.columns(1)
             with c1:
                 if st.button("Mot de passe oublié ?", key="forgot"):
                     st.session_state.step = "forgot_email"
