@@ -7,6 +7,7 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, date
 import time
 import psycopg2
+from psycopg2.extras import RealDictCursor
 
 # ======================
 # CONFIG STREAMLIT
@@ -29,7 +30,7 @@ conn = psycopg2.connect(
     user=DB_USER,
     password=DB_PASSWORD
 )
-cursor = conn.cursor(dictionary=True)
+cursor = conn.cursor(cursor_factory=RealDictCursor)
 
 tables_reset = ['etudiants','professeurs','chefs_departement','administrateurs','vice_doyens']
 
