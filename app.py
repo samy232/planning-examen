@@ -1155,104 +1155,98 @@ elif st.session_state.step == "dashboard":
             st.info("Aucune surveillance trouvée pour ces critères.")
 
 # --------------------
-    # Chef de département UI (Optimisé)
+    # --------------------
+    # Chef de département UI (Optimisé & Moderne)
     # --------------------
     elif role == "Chef":
         st.title("🧭 Tableau de bord — Chef de département")
         
-        # Récupération des infos utilisateur (on suppose que user_email est en session)
-        # On récupère le dept_id via le profil professeur/chef
-        user_profile = db_get_one("chefs_departement", "*", eq={"email": st.session_state.user_email})
-        dept_id = user_profile.get('dept_id') if user_profile else None
+        # 1. RÉCUPÉRATION DES DONNÉES (Optimisée pour la vitesse)
+        with st.spinner("Chargement des données du département..."):
+            # On récupère le profil du chef pour avoir son dept_id
+            user_profile = db_get_one("chefs_departement", "*", eq={"email": st.session_state.user_email})
+            dept_id = user_profile.get('dept_id') if user_profile else None
 
-        if not dept_id:
-            st.warning("⚠️ Impossible de déterminer votre département. Vérifiez votre profil.")
-        else:
-            # 1. RÉCUPÉRATION DES DONNÉES EN MASSE (Évite les boucles lentes)
-            # On récupère toutes les formations du département d'un coup
-            formations = db_select("formations", "id, nom", eq={"dept_id": dept_id})
-            form_ids = [f['id'] for f in formations]
-            form_map = {f['id']: f['nom'] for f in formations}
-
-            # On récupère tous les modules liés à ces formations
-            all_modules = []
-            if form_ids:
-                # On utilise un filtre de liste si possible, sinon on boucle sur les formations (plus rapide que sur les exams)
-                for fid in form_ids:
-                    all_modules.extend(db_select("modules", "id, nom, formation_id", eq={"formation_id": fid}))
-            
-            mod_ids = [m['id'] for m in all_modules]
-            mod_map = {m['id']: m for m in all_modules}
-
-            # 2. STATISTIQUES RAPIDES
-            st.subheader(f"Statistiques — Département : {user_profile.get('nom','-')}")
-            
-            col_stat1, col_stat2 = st.columns(2)
-            
-            # Récupération de tous les examens pour ces modules
-            all_exams = []
-            if mod_ids:
-                for mid in mod_ids:
-                    all_exams.extend(db_select("examens", "*", eq={"module_id": mid}))
-
-            with col_stat1:
-                st.metric("Total Formations", len(formations))
-                st.metric("Total Modules", len(all_modules))
-            with col_stat2:
-                nb_non_valides = sum(1 for e in all_exams if not e.get('validated'))
-                st.metric("Examens à valider", nb_non_valides, delta=-nb_non_valides, delta_color="inverse")
-
-            st.divider()
-
-            # 3. VALIDATION DES EXAMENS GÉNÉRÉS (PREMIÈRE COUCHE)
-            st.subheader("📋 Examens en attente de validation")
-            st.info("Voici les examens générés par l'administrateur. Validez-les pour les rendre officiels.")
-
-            # Filtrer les examens non validés uniquement
-            pending_exams = [e for e in all_exams if e.get('validated') in (None, 0, False)]
-
-            if not pending_exams:
-                st.success("✅ Tous les examens de votre département sont validés.")
+            if not dept_id:
+                st.warning("⚠️ Département non identifié.")
             else:
-                # Récupération des noms de salles en une fois pour la performance
-                salles = db_select("lieu_examen", "id, nom")
-                salle_map = {s['id']: s['nom'] for s in salles}
-
-                for ex in pending_exams:
-                    with st.container():
-                        m_info = mod_map.get(ex['module_id'], {})
-                        f_nom = form_map.get(m_info.get('formation_id'), "Inconnue")
-                        m_nom = m_info.get('nom', "Inconnu")
-                        salle_nom = salle_map.get(ex['salle_id'], "N/A")
-                        
-                        # Design en ligne
-                        c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
-                        
-                        c1.markdown(f"**{m_nom}** \n*{f_nom}*")
-                        c2.write(f"📅 {ex['date_heure']}")
-                        c3.write(f"📍 {salle_nom} ({ex['duree_minutes']} min)")
-                        
-                        if c4.button("Valider", key=f"val_{ex['id']}", type="primary"):
-                            res = db_update("examens", {"validated": True}, {"id": ex['id']})
-                            if res.get('error'):
-                                st.error("Erreur")
-                            else:
-                                st.success(f"Validé !")
-                                time.sleep(0.5)
-                                st.rerun()
-                    st.divider()
-
-            # 4. SECTION CONFLITS (Optionnel - Uniquement pour info)
-            with st.expander("⚠️ Voir les alertes de conflits du département"):
-                conflicts = detect_conflicts()
-                # On filtre les conflits de capacité pour les examens du département
-                dept_room_conflicts = [c for c in conflicts.get('salles_capacite', []) 
-                                      if c.get('examen_id') in [e['id'] for e in all_exams]]
+                # ÉTAPE CLÉ : On récupère TOUT le nécessaire en 4 requêtes max (pas de boucles)
+                all_formations = db_select("formations", "id, nom", eq={"dept_id": dept_id})
+                form_ids = [f['id'] for f in all_formations]
                 
-                if dept_room_conflicts:
-                    st.table(dept_room_conflicts)
-                else:
-                    st.write("Aucun conflit de capacité détecté.")
+                # Récupérer tous les modules et examens liés au département
+                all_modules = []
+                all_exams = []
+                if form_ids:
+                    # On récupère les modules par formation
+                    for fid in form_ids:
+                        all_modules.extend(db_select("modules", "id, nom, formation_id", eq={"formation_id": fid}))
+                    
+                    mod_ids = [m['id'] for m in all_modules]
+                    # On récupère les examens par module
+                    if mod_ids:
+                        for mid in mod_ids:
+                            all_exams.extend(db_select("examens", "*", eq={"module_id": mid}))
+
+        # 2. PRÉPARATION DES STATS (En local, donc ultra rapide)
+        # On crée des dictionnaires pour compter rapidement
+        exam_counts_by_form = {f['nom']: 0 for f in all_formations}
+        mod_counts_by_form = {f['nom']: 0 for f in all_formations}
+        
+        # Map pour savoir quel module appartient à quelle formation
+        mod_to_form_name = {m['id']: next((f['nom'] for f in all_formations if f['id'] == m['formation_id']), "Inconnue") for m in all_modules}
+
+        for m in all_modules:
+            f_name = next((f['nom'] for f in all_formations if f['id'] == m['formation_id']), None)
+            if f_name: mod_counts_by_form[f_name] += 1
+            
+        for e in all_exams:
+            f_name = mod_to_form_name.get(e['module_id'])
+            if f_name: exam_counts_by_form[f_name] += 1
+
+        # 3. AFFICHAGE DES MÉTRIQUES ET GRAPHES
+        st.subheader("📊 Aperçu Analytique")
+        m1, m2, m3 = st.columns(3)
+        nb_a_valider = sum(1 for e in all_exams if not e.get('validated'))
+        
+        m1.metric("Formations", len(all_formations))
+        m2.metric("Modules Total", len(all_modules))
+        m3.metric("À Valider", nb_a_valider, delta=f"{nb_a_valider} en attente", delta_color="inverse")
+
+        # Graphiques modernes
+        col_chart1, col_chart2 = st.columns(2)
+        with col_chart1:
+            st.write("**Examens par Formation**")
+            st.bar_chart(exam_counts_by_form)
+        with col_chart2:
+            st.write("**Modules par Formation**")
+            st.area_chart(mod_counts_by_form)
+
+        st.divider()
+
+        # 4. VALIDATION (Interface simplifiée)
+        st.subheader("📋 Validation des Examens")
+        pending_exams = [e for e in all_exams if not e.get('validated')]
+
+        if not pending_exams:
+            st.success("✅ Aucun examen en attente de validation.")
+        else:
+            # Récupération des salles une seule fois
+            salles = db_select("lieu_examen", "id, nom")
+            salle_map = {s['id']: s['nom'] for s in salles}
+            mod_map = {m['id']: m['nom'] for m in all_modules}
+
+            for ex in pending_exams:
+                with st.expander(f"📌 {mod_map.get(ex['module_id'], 'Module')} — {ex['date_heure']}"):
+                    c1, c2, c3 = st.columns([2, 2, 1])
+                    c1.write(f"**Formation:** {mod_to_form_name.get(ex['module_id'])}")
+                    c2.write(f"**Salle:** {salle_map.get(ex['salle_id'], 'N/A')} | **Durée:** {ex['duree_minutes']} min")
+                    
+                    if c3.button("✅ Valider", key=f"chef_v_{ex['id']}", use_container_width=True):
+                        if db_update("examens", {"validated": True}, {"id": ex['id']}):
+                            st.toast(f"Examen validé !", icon="✅")
+                            time.sleep(0.5)
+                            st.rerun()
     # --------------------
     # Administrateur exams (service planification) : génération + optimisation + détection
     # --------------------
