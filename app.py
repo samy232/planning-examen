@@ -747,132 +747,104 @@ elif st.session_state.step == "dashboard":
             st.session_state.role = ""
             st.rerun()
 
-# --------------------
-# Étudiant & Professeur UIs (inchangées)
-# --------------------
+   # --------------------
+    # Étudiant & Professeur UIs (inchangées)
+    # --------------------
+    if role == "Etudiant":
+        st.title(f"👋 Bienvenue, {user_data.get('prenom','')} {user_data.get('nom','') if user_data else ''}")
+        st.subheader("🎓 Emploi du temps des examens")
+        cursor.execute("""
+            SELECT DISTINCT m.nom FROM modules m
+            JOIN inscriptions i ON i.module_id = m.id
+            JOIN etudiants et ON et.id = i.etudiant_id
+            WHERE et.email = %s
+        """, (email,))
+        liste_modules = [row['nom'] for row in cursor.fetchall()]
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            module_filtre = st.selectbox("Filtrer par Module", ["Tous les modules"] + liste_modules)
+        with col_f2:
+            try:
+                date_filtre = st.date_input("Filtrer par Date", value=None)
+            except Exception:
+                date_filtre = None
 
-if role == "Etudiant":
-    st.title(f"👋 Bienvenue, {user_data.get('prenom','')} {user_data.get('nom','') if user_data else ''}")
-    st.subheader("🎓 Emploi du temps des examens")
+        query = """
+            SELECT m.nom AS Module, l.nom AS Salle, e.date_heure AS 'Date & Heure', e.duree_minutes AS 'Durée'
+            FROM examens e
+            JOIN modules m ON e.module_id = m.id
+            JOIN lieu_examen l ON e.salle_id = l.id
+            JOIN inscriptions i ON i.module_id = m.id
+            JOIN etudiants et ON et.id = i.etudiant_id
+            WHERE et.email = %s
+        """
+        params = [email]
+        if module_filtre != "Tous les modules":
+            query += " AND m.nom = %s"
+            params.append(module_filtre)
+        if date_filtre:
+            query += " AND DATE(e.date_heure) = %s"
+            params.append(date_filtre)
+        query += " ORDER BY e.date_heure ASC"
+        cursor.execute(query, tuple(params))
+        resultats = cursor.fetchall()
+        if resultats:
+            st.table(resultats)
+        else:
+            st.info("Aucun examen trouvé.")
 
-    # Récupération des modules de l'étudiant
-    cursor.execute("""
-        SELECT DISTINCT m.nom 
-        FROM modules m
-        JOIN inscriptions i ON i.module_id = m.id
-        JOIN etudiants et ON et.id = i.etudiant_id
-        WHERE et.email = %s
-    """, (email,))
-    liste_modules = [row['nom'] for row in cursor.fetchall()]
-
-    # Filtres
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        module_filtre = st.selectbox("Filtrer par Module", ["Tous les modules"] + liste_modules)
-    with col_f2:
-        try:
-            date_filtre = st.date_input("Filtrer par Date", value=None)
-        except Exception:
-            date_filtre = None
-
-    # Requête des examens
-    query = """
-        SELECT 
-            m.nom AS Module, 
-            l.nom AS Salle, 
-            e.date_heure AS 'Date & Heure', 
-            e.duree_minutes AS 'Durée'
-        FROM examens e
-        JOIN modules m ON e.module_id = m.id
-        JOIN lieu_examen l ON e.salle_id = l.id
-        JOIN inscriptions i ON i.module_id = m.id
-        JOIN etudiants et ON et.id = i.etudiant_id
-        WHERE et.email = %s
-    """
-    params = [email]
-    if module_filtre != "Tous les modules":
-        query += " AND m.nom = %s"
-        params.append(module_filtre)
-    if date_filtre:
-        query += " AND DATE(e.date_heure) = %s"
-        params.append(date_filtre)
-
-    query += " ORDER BY e.date_heure ASC"
-    cursor.execute(query, tuple(params))
-    resultats = cursor.fetchall()
-
-    if resultats:
-        st.table(resultats)
-    else:
-        st.info("Aucun examen trouvé.")
-
-elif role == "Professeur":
-    st.title(f"👨‍🏫 Bienvenue, M. {user_data.get('nom','') if user_data else ''}")
-    st.subheader("📋 Mes surveillances d'examens")
-
-    # Récupération des modules et salles pour le professeur
-    cursor.execute("""
-        SELECT DISTINCT m.nom 
-        FROM modules m
-        JOIN examens e ON e.module_id = m.id
-        JOIN professeurs p ON p.id = e.prof_id
-        WHERE p.email = %s
-    """, (email,))
-    liste_modules_prof = [row['nom'] for row in cursor.fetchall()]
-
-    cursor.execute("""
-        SELECT DISTINCT l.nom 
-        FROM lieu_examen l
-        JOIN examens e ON e.salle_id = l.id
-        JOIN professeurs p ON p.id = e.prof_id
-        WHERE p.email = %s
-    """, (email,))
-    liste_salles_prof = [row['nom'] for row in cursor.fetchall()]
-
-    # Filtres
-    col_f1, col_f2, col_f3 = st.columns(3)
-    with col_f1:
-        mod_f = st.selectbox("Par Module", ["Tous les modules"] + liste_modules_prof)
-    with col_f2:
-        salle_f = st.selectbox("Par Salle", ["Toutes les salles"] + liste_salles_prof)
-    with col_f3:
-        try:
-            dat_f = st.date_input("Par Date", value=None)
-        except Exception:
-            dat_f = None
-
-    # Requête des surveillances
-    query_prof = """
-        SELECT 
-            m.nom AS Module, 
-            l.nom AS Salle, 
-            e.date_heure AS 'Date & Heure', 
-            e.duree_minutes AS 'Durée'
-        FROM examens e
-        JOIN modules m ON e.module_id = m.id
-        JOIN lieu_examen l ON e.salle_id = l.id
-        JOIN professeurs p ON p.id = e.prof_id
-        WHERE p.email = %s
-    """
-    params_prof = [email]
-    if mod_f != "Tous les modules":
-        query_prof += " AND m.nom = %s"
-        params_prof.append(mod_f)
-    if salle_f != "Toutes les salles":
-        query_prof += " AND l.nom = %s"
-        params_prof.append(salle_f)
-    if dat_f:
-        query_prof += " AND DATE(e.date_heure) = %s"
-        params_prof.append(dat_f)
-
-    query_prof += " ORDER BY e.date_heure ASC"
-    cursor.execute(query_prof, tuple(params_prof))
-    res_prof = cursor.fetchall()
-
-    if res_prof:
-        st.table(res_prof)
-    else:
-        st.info("Aucune surveillance trouvée pour ces critères.")
+    elif role == "Professeur":
+        st.title(f"👨‍🏫 Bienvenue, M. {user_data.get('nom','') if user_data else ''}")
+        st.subheader("📋 Mes surveillances d'examens")
+        col_f1, col_f2, col_f3 = st.columns(3)
+        cursor.execute("""
+            SELECT DISTINCT m.nom FROM modules m 
+            JOIN examens e ON e.module_id = m.id 
+            JOIN professeurs p ON p.id = e.prof_id 
+            WHERE p.email = %s
+        """, (email,))
+        liste_modules_prof = [row['nom'] for row in cursor.fetchall()]
+        cursor.execute("""
+            SELECT DISTINCT l.nom FROM lieu_examen l
+            JOIN examens e ON e.salle_id = l.id
+            JOIN professeurs p ON p.id = e.prof_id
+            WHERE p.email = %s
+        """, (email,))
+        liste_salles_prof = [row['nom'] for row in cursor.fetchall()]
+        with col_f1:
+            mod_f = st.selectbox("Par Module", ["Tous les modules"] + liste_modules_prof)
+        with col_f2:
+            salle_f = st.selectbox("Par Salle", ["Toutes les salles"] + liste_salles_prof)
+        with col_f3:
+            try:
+                dat_f = st.date_input("Par Date", value=None)
+            except Exception:
+                dat_f = None
+        query_prof = """
+            SELECT m.nom AS Module, l.nom AS Salle, e.date_heure AS 'Date & Heure', e.duree_minutes AS 'Durée'
+            FROM examens e
+            JOIN modules m ON e.module_id = m.id
+            JOIN lieu_examen l ON e.salle_id = l.id
+            JOIN professeurs p ON p.id = e.prof_id
+            WHERE p.email = %s
+        """
+        params_prof = [email]
+        if mod_f != "Tous les modules":
+            query_prof += " AND m.nom = %s"
+            params_prof.append(mod_f)
+        if salle_f != "Toutes les salles":
+            query_prof += " AND l.nom = %s"
+            params_prof.append(salle_f)
+        if dat_f:
+            query_prof += " AND DATE(e.date_heure) = %s"
+            params_prof.append(dat_f)
+        query_prof += " ORDER BY e.date_heure ASC"
+        cursor.execute(query_prof, tuple(params_prof))
+        res_prof = cursor.fetchall()
+        if res_prof:
+            st.table(res_prof)
+        else:
+            st.info("Aucune surveillance trouvée pour ces critères.")
 
     # --------------------
     # Chef de département : Validation par département, stats et conflits par formation
