@@ -1239,50 +1239,115 @@ elif st.session_state.step == "dashboard":
     # --------------------
     # Administrateur exams (service planification) : génération + optimisation + détection
     # --------------------
+ # --------------------
+    # Administrateur exams (service planification) : génération + optimisation + détection
+    # --------------------
     elif role in ("Admin", "Administrateur examens"):
         st.title("🛠️ Service Planification — Administrateur examens")
+        
+        # --- INITIALISATION DES ETATS (Session State) ---
+        if "simulation_done" not in st.session_state:
+            st.session_state.simulation_done = False
+        if "last_report" not in st.session_state:
+            st.session_state.last_report = {}
+        if "last_conflicts" not in st.session_state:
+            st.session_state.last_conflicts = {}
+
         st.subheader("Génération & Optimisation des ressources")
 
         # Sélection de période
         col_d1, col_d2 = st.columns(2)
         today = date.today()
-        default_start = today
-        default_end = today + timedelta(days=7)
         with col_d1:
-            start_date = st.date_input("Date de début", value=default_start, key="admin_gen_start")
+            start_date = st.date_input("Date de début", value=today, key="admin_gen_start")
         with col_d2:
-            end_date = st.date_input("Date de fin", value=default_end, key="admin_gen_end")
+            end_date = st.date_input("Date de fin", value=today + timedelta(days=7), key="admin_gen_end")
 
-        start_str = start_date.strftime("%Y-%m-%d") if isinstance(start_date, date) else None
-        end_str = end_date.strftime("%Y-%m-%d") if isinstance(end_date, date) else None
+        start_str = start_date.strftime("%Y-%m-%d")
+        end_str = end_date.strftime("%Y-%m-%d")
 
-        st.write("Actions disponibles :")
-        col_a1, col_a2 = st.columns(2)
-
-        # keys to hide from display (user requested)
+        # Configuration des filtres d'affichage
         excluded_keys = {'etudiants_1parjour', 'profs_3parjour', 'surveillances_par_prof', 'conflits_par_dept'}
 
-        with col_a1:
-            if st.button("Générer automatiquement"):
-                if start_str is None or end_str is None or start_str > end_str:
-                    st.error("Veuillez choisir une période valide (début ≤ fin).")
-                else:
-                    tic = time.time()
-                    report, conflicts = generate_timetable(start_str, end_str, force=False)
-                    duration = time.time() - tic
-                    # Concise summary only (no full JSON dump)
-                    st.success(f"✅ Génération (simulation) terminée en {duration:.1f} secondes — {report.get('created_slots',0)} créés (simulés).")
-                    st.write(f"- Tentatives : {report.get('attempts',0)}")
-                    st.write(f"- Créneaux prévus : {report.get('scheduled_count',0)}")
-                    if report.get('scheduled_count',0) > 0:
-                        st.info(f"Aperçu : {report.get('scheduled_preview_count',0)} créneaux (utilisez 'Persist schedule to DB (force)' pour écrire).")
+        st.divider()
 
-                    # Conflict summary compact
-                    visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
-                    if any(visible_conflicts.values()):
-                        st.warning("Conflits détectés (résumé) :")
+        col_a1, col_a2 = st.columns(2)
+
+        with col_a1:
+            st.write("### 📅 Planification")
+            # BOUTON 1 : SIMULATION
+            if st.button("🔍 Lancer la simulation (Aperçu)", use_container_width=True):
+                if start_str > end_str:
+                    st.error("La date de début doit être inférieure à la date de fin.")
+                else:
+                    with st.spinner("Calcul de l'emploi du temps optimal..."):
+                        report, conflicts = generate_timetable(start_str, end_str, force=False)
+                        st.session_state.last_report = report
+                        st.session_state.last_conflicts = conflicts
+                        st.session_state.simulation_done = True
+            
+            # AFFICHAGE DES RÉSULTATS DE SIMULATION
+            if st.session_state.simulation_done:
+                rep = st.session_state.last_report
+                conf = st.session_state.last_conflicts
+                
+                st.info(f"**Résultat simulation :** {rep.get('scheduled_count',0)} créneaux planifiables.")
+                
+                # BOUTON 2 : SAUVEGARDE RÉELLE (Ne disparaît plus au clic)
+                st.warning("⚠️ Ces données ne sont pas encore enregistrées.")
+                if st.button("✅ SAUVEGARDER DANS LA BASE", type="primary", use_container_width=True):
+                    with st.spinner("Écriture dans Supabase..."):
+                        final_rep, final_conf = generate_timetable(start_str, end_str, force=True)
+                        if final_rep.get('created_slots', 0) > 0:
+                            st.success(f"🚀 Succès ! {final_rep.get('created_slots',0)} examens enregistrés.")
+                            st.session_state.simulation_done = False # On reset après l'enregistrement
+                        else:
+                            st.error(f"Erreur lors de l'insertion : {final_conf.get('insert_error', 'Inconnue')}")
+
+        with col_a2:
+            st.write("### ⚡ Optimisation & Analyse")
+            # OPTIMISATION
+            if st.button("🪄 Optimiser les ressources", use_container_width=True):
+                with st.spinner("Optimisation en cours..."):
+                    report_opt, conflicts_opt = optimize_resources(start_str, end_str)
+                    st.success("Optimisation terminée (simulation).")
+                    for k, v in report_opt.get('improvements', {}).items():
+                        st.write(f"- {k.replace('_',' ')} : {v}")
+
+            # DÉTECTION SIMPLE
+            if st.button("🕵️ Détecter les conflits", use_container_width=True):
+                with st.spinner("Analyse des conflits existants..."):
+                    conflicts_det = detect_conflicts(start_str, end_str)
+                    visible_conflicts = {k: v for k, v in conflicts_det.items() if k not in excluded_keys}
+                    total = sum(len(v) for v in visible_conflicts.values())
+                    
+                    if total == 0:
+                        st.success("Aucun conflit majeur détecté sur cette période.")
+                    else:
+                        st.warning(f"{total} conflits détectés.")
                         for k, rows in visible_conflicts.items():
-                            st.write(f"- {k.replace('_',' ')} : {len(rows)}")
+                            if rows:
+                                with st.expander(f"Détails : {k.replace('_',' ')} ({len(rows)})"):
+                                    show_table_safe(rows)
+
+        # Zone d'affichage des détails de la simulation (si active)
+        if st.session_state.simulation_done:
+            st.divider()
+            st.subheader("Détails de l'aperçu généré")
+            conf = st.session_state.last_conflicts
+            visible_sim = {k: v for k, v in conf.items() if k not in excluded_keys}
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                st.write(f"**Tentatives :** {st.session_state.last_report.get('attempts',0)}")
+            with c2:
+                st.write(f"**Temps de calcul :** {st.session_state.last_report.get('duration_seconds',0):.2f}s")
+            
+            if any(visible_sim.values()):
+                st.error("Conflits résiduels dans cette simulation :")
+                for k, rows in visible_sim.items():
+                    if rows:
+                        st.write(f"- {k.replace('_',' ')} : {len(rows)}")
 
                     # Provide an explicit "persist" option
                     if st.button("✅ Persist schedule to DB (force)"):
