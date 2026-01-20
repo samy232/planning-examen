@@ -100,23 +100,43 @@ except Exception:
 
 if cursor is None:
     class DummyCursor:
+        def __init__(self):
+            # store last query/params and a simple result buffer
+            self._last_query = None
+            self._last_params = None
+            self._buffer = []
+
         def execute(self, *args, **kwargs):
+            # Graceful fallback: don't raise. Record the attempted SQL and params,
+            # warn the user in the Streamlit UI, and provide empty results so app can continue.
             sql = args[0] if args else "<sql missing>"
-            raise RuntimeError(
-                "No working DB cursor available. To enable DB queries, add database credentials to Streamlit secrets under "
-                "`st.secrets['db']` with keys: host, port, user, password, database and optional 'driver' "
-                "('psycopg2' or 'mysql' or 'pymysql').\n"
-                f"Attempted SQL: {sql}"
-            )
+            params = args[1] if len(args) > 1 else kwargs.get('params', None)
+            self._last_query = sql
+            self._last_params = params
+            # Inform developer/user in the Streamlit app (non-blocking)
+            try:
+                st.warning(f"[DB fallback] Query skipped (no DB configured): {sql} — params: {params}")
+            except Exception:
+                # If Streamlit isn't available in this context for some reason, ignore
+                pass
+            # Provide empty buffer so fetchone/fetchall behave sanely (no exceptions)
+            self._buffer = []
+
         def fetchone(self):
+            if self._buffer:
+                return self._buffer[0]
             return None
+
         def fetchall(self):
-            return []
+            return list(self._buffer)
+
     class DummyConn:
         def commit(self):
-            raise RuntimeError(
-                "No working DB connection available to commit. Provide DB credentials in st.secrets['db']."
-            )
+            # no-op when there's no real DB; warn user
+            try:
+                st.warning("Commit called but no DB configured; changes not persisted.")
+            except Exception:
+                pass
 
     cursor = DummyCursor()
     conn = DummyConn()
@@ -1171,7 +1191,7 @@ elif st.session_state.step == "dashboard":
                     if cols[3].button(f"Valider final {ex['id']}", key=f"final_val_{ex['id']}"):
                         cursor.execute("UPDATE examens SET final_validated=1 WHERE id=%s", (ex['id'],))
                         conn.commit()
-                        st.success(f"Examen {ex['id']} validé définitivement.")
+                        st.success(f"Examen {ex['id']} valid�� définitivement.")
                         st.experimental_rerun()
             else:
                 st.info("Aucun examen en attente de validation finale.")
