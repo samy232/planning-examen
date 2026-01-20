@@ -931,100 +931,111 @@ elif st.session_state.step == "dashboard":
                 st.info("aucun conflit détecté")
 
     # --------------------
-    # Administrateur exams (service planification) : génération + optimisation + détection
+# Administrateur exams (service planification) : génération + optimisation + détection
+# --------------------
+elif role in ("Admin", "Administrateur examens"):
+    st.title("🛠️ Service Planification — Administrateur examens")
+    st.subheader("Génération & Optimisation des ressources")
+
+    # Sélection de période
+    col_d1, col_d2 = st.columns(2)
+    today = date.today()
+    default_start = today
+    default_end = today + timedelta(days=7)
+    with col_d1:
+        start_date = st.date_input("Date de début", value=default_start, key="admin_gen_start")
+    with col_d2:
+        end_date = st.date_input("Date de fin", value=default_end, key="admin_gen_end")
+
+    start_str = start_date.strftime("%Y-%m-%d") if isinstance(start_date, date) else None
+    end_str = end_date.strftime("%Y-%m-%d") if isinstance(end_date, date) else None
+
+    st.write("Actions disponibles :")
+    col_a1, col_a2 = st.columns(2)
+
+    # Keys à cacher dans l’affichage
+    excluded_keys = {'etudiants_1parjour', 'profs_3parjour', 'surveillances_par_prof', 'conflits_par_dept'}
+
     # --------------------
-    elif role in ("Admin", "Administrateur examens"):
-        st.title("🛠️ Service Planification — Administrateur examens")
-        st.subheader("Génération & Optimisation des ressources")
-
-        # Sélection de période
-        col_d1, col_d2 = st.columns(2)
-        today = date.today()
-        default_start = today
-        default_end = today + timedelta(days=7)
-        with col_d1:
-            start_date = st.date_input("Date de début", value=default_start, key="admin_gen_start")
-        with col_d2:
-            end_date = st.date_input("Date de fin", value=default_end, key="admin_gen_end")
-
-        start_str = start_date.strftime("%Y-%m-%d") if isinstance(start_date, date) else None
-        end_str = end_date.strftime("%Y-%m-%d") if isinstance(end_date, date) else None
-
-        st.write("Actions disponibles :")
-        col_a1, col_a2 = st.columns(2)
-
-        # keys to hide from display (user requested)
-        excluded_keys = {'etudiants_1parjour', 'profs_3parjour', 'surveillances_par_prof', 'conflits_par_dept'}
-
-        with col_a1:
-            if st.button("Générer automatiquement"):
-                if start_str is None or end_str is None or start_str > end_str:
-                    st.error("Veuillez choisir une période valide (début ≤ fin).")
-                else:
-                    tic = time.time()
-                    report, conflicts = generate_timetable(cursor, conn, start_str, end_str, force=False)
-                    duration = time.time() - tic
-                    st.success(f"✅ Génération complète terminée en {duration:.1f} secondes !")
-                    # display only visible conflicts (exclude the 4 keys requested)
-                    visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
-                    total_visible = sum(len(v) for v in visible_conflicts.values())
-                    if total_visible == 0:
-                        st.info("Aucun conflit affiché pour cette analyse.")
-                    else:
-                        st.warning(f"{total_visible} conflit(s) affiché(s).")
-                        for k, rows in visible_conflicts.items():
-                            if rows:
-                                with st.expander(f"{k} — {len(rows)} élément(s)"):
-                                    show_table_safe(rows)
-
-        with col_a2:
-            if st.button("Optimiser les ressources"):
-                if start_str is None or end_str is None or start_str > end_str:
-                    st.error("Veuillez choisir une période valide (début ≤ fin).")
-                else:
-                    tic = time.time()
-                    report, conflicts = optimize_resources(cursor, conn, start_str, end_str)
-                    duration = time.time() - tic
-                    st.success(f"✅ Optimisation terminée en {report.get('duration_seconds', duration):.1f} secondes.")
-                    st.write("Améliorations estimées :")
-                    for k, v in report.get('improvements', {}).items():
-                        st.write(f"- {k.replace('_',' ')} : {v}")
-                    st.markdown("Notes :")
-
-                    # display only visible conflicts (exclude the 4 keys requested)
-                    visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
-                    total_visible = sum(len(v) for v in visible_conflicts.values())
-                    if total_visible == 0:
-                        st.info("Aucun conflit affiché après optimisation.")
-                    else:
-                        st.warning(f"{total_visible} conflit(s) affiché(s) après optimisation.")
-                        for k, rows in visible_conflicts.items():
-                            if rows:
-                                with st.expander(f"{k} — {len(rows)} élément(s)"):
-                                    show_table_safe(rows)
-
-        # Add a dedicated "Détecter conflits" action (does not change other UI)
-        if st.button("Détecter conflits"):
+    # Bouton Générer automatiquement
+    # --------------------
+    with col_a1:
+        if st.button("Générer automatiquement"):
             if start_str is None or end_str is None or start_str > end_str:
                 st.error("Veuillez choisir une période valide (début ≤ fin).")
             else:
                 tic = time.time()
-                conflicts = detect_conflicts(cursor, start_str, end_str)
+                # La fonction doit être PostgreSQL-compatible
+                report, conflicts = generate_timetable(cursor, conn, start_str, end_str, force=False)
                 duration = time.time() - tic
-                # Show only visible conflicts (exclude the 4 keys requested)
+                st.success(f"✅ Génération complète terminée en {duration:.1f} secondes !")
+
+                # Affichage uniquement des conflits visibles
                 visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
                 total_visible = sum(len(v) for v in visible_conflicts.values())
                 if total_visible == 0:
-                    st.success(f"✅ Analyse terminée en {duration:.1f} secondes — Aucun conflit affiché pour les catégories visibles.")
+                    st.info("Aucun conflit affiché pour cette analyse.")
                 else:
-                    st.warning(f"⚠️ Analyse terminée en {duration:.1f} secondes — {total_visible} conflit(s) affiché(s).")
-                    st.markdown("**Résumé des conflits affichés**")
-                    for k, rows in visible_conflicts.items():
-                        st.write(f"- {k.replace('_',' ')} : {len(rows)}")
+                    st.warning(f"{total_visible} conflit(s) affiché(s).")
                     for k, rows in visible_conflicts.items():
                         if rows:
-                            with st.expander(f"Détails — {k}"):
+                            with st.expander(f"{k} — {len(rows)} élément(s)"):
                                 show_table_safe(rows)
+
+    # --------------------
+    # Bouton Optimiser les ressources
+    # --------------------
+    with col_a2:
+        if st.button("Optimiser les ressources"):
+            if start_str is None or end_str is None or start_str > end_str:
+                st.error("Veuillez choisir une période valide (début ≤ fin).")
+            else:
+                tic = time.time()
+                report, conflicts = optimize_resources(cursor, conn, start_str, end_str)
+                duration = time.time() - tic
+                st.success(f"✅ Optimisation terminée en {report.get('duration_seconds', duration):.1f} secondes.")
+                
+                st.write("Améliorations estimées :")
+                for k, v in report.get('improvements', {}).items():
+                    st.write(f"- {k.replace('_',' ')} : {v}")
+                
+                # Affichage uniquement des conflits visibles
+                visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
+                total_visible = sum(len(v) for v in visible_conflicts.values())
+                if total_visible == 0:
+                    st.info("Aucun conflit affiché après optimisation.")
+                else:
+                    st.warning(f"{total_visible} conflit(s) affiché(s) après optimisation.")
+                    for k, rows in visible_conflicts.items():
+                        if rows:
+                            with st.expander(f"{k} — {len(rows)} élément(s)"):
+                                show_table_safe(rows)
+
+    # --------------------
+    # Bouton Détecter conflits
+    # --------------------
+    if st.button("Détecter conflits"):
+        if start_str is None or end_str is None or start_str > end_str:
+            st.error("Veuillez choisir une période valide (début ≤ fin).")
+        else:
+            tic = time.time()
+            conflicts = detect_conflicts(cursor, start_str, end_str)
+            duration = time.time() - tic
+
+            visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
+            total_visible = sum(len(v) for v in visible_conflicts.values())
+            
+            if total_visible == 0:
+                st.success(f"✅ Analyse terminée en {duration:.1f} secondes — Aucun conflit affiché pour les catégories visibles.")
+            else:
+                st.warning(f"⚠️ Analyse terminée en {duration:.1f} secondes — {total_visible} conflit(s) affiché(s).")
+                st.markdown("**Résumé des conflits affichés**")
+                for k, rows in visible_conflicts.items():
+                    st.write(f"- {k.replace('_',' ')} : {len(rows)}")
+                for k, rows in visible_conflicts.items():
+                    if rows:
+                        with st.expander(f"Détails — {k}"):
+                            show_table_safe(rows)
 
     # --------------------
     # Vice-doyen / Doyen : Vue stratégique globale
