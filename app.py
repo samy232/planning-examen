@@ -647,7 +647,7 @@ if st.session_state.step == "login":
             color: white !important;
             border: none;
             border-radius: 10px;
-            height: 48px;
+            height: 100px;
             width: 100%;
             font-weight: bold;
             margin-top: 15px;
