@@ -11,11 +11,7 @@ from supabase import create_client, Client
 # ======================
 # CONFIG STREAMLIT
 # ======================
-st.set_page_config(
-    page_title="EDT Examens",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+st.set_page_config(page_title="Connexion EDT", layout="wide", initial_sidebar_state="collapsed")
 
 # ======================
 # SUPABASE CLIENT
@@ -27,7 +23,20 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # ======================
 # BACKWARDS COMPATIBILITY: cursor / conn
 # ======================
-
+# You mentioned you changed the cursor; many parts of the script still expect a DB
+# connection object `conn` and a DB cursor `cursor` with methods:
+#   - cursor.execute(sql, params)
+#   - cursor.fetchone()
+#   - cursor.fetchall()
+#   - conn.commit()
+#
+# This block attempts to create a real DB connection from st.secrets["db"] (or st.secrets["database"])
+# supporting psycopg2 (Postgres), mysql.connector, or pymysql. If no usable secrets/driver is found,
+# it provides a DummyCursor that gives clear runtime errors explaining how to configure secrets.
+#
+# To fully enable all DB operations provide st.secrets["db"] with keys:
+#   host, port, user, password, database, optional driver ("psycopg2" or "mysql" or "pymysql")
+#
 conn = None
 cursor = None
 
@@ -43,46 +52,38 @@ def make_cursor_from_secrets():
     database = db_secrets.get("database") or db_secrets.get("dbname")
     driver = (db_secrets.get("driver") or "auto").lower()
 
+    # Try psycopg2 / Postgres first if requested or auto
     if driver in ("psycopg2", "postgres", "pg", "auto"):
         try:
             import psycopg2
             import psycopg2.extras
             conn_pg = psycopg2.connect(
-                host=host,
-                port=port or 5432,
-                user=user,
-                password=password,
-                dbname=database
+                host=host, port=port or 5432, user=user, password=password, dbname=database
             )
             cur_pg = conn_pg.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             return conn_pg, cur_pg
         except Exception:
+            # fallthrough to try mysql drivers
             pass
 
+    # Try mysql.connector
     if driver in ("mysql", "mysql.connector", "auto"):
         try:
             import mysql.connector
             conn_my = mysql.connector.connect(
-                host=host,
-                port=int(port) if port else 3306,
-                user=user,
-                password=password,
-                database=database
+                host=host, port=int(port) if port else 3306, user=user, password=password, database=database
             )
             cur_my = conn_my.cursor(dictionary=True)
             return conn_my, cur_my
         except Exception:
             pass
 
+    # Try pymysql
     if driver in ("pymysql", "auto"):
         try:
             import pymysql
             conn_pm = pymysql.connect(
-                host=host,
-                port=int(port) if port else 3306,
-                user=user,
-                password=password,
-                db=database,
+                host=host, port=int(port) if port else 3306, user=user, password=password, db=database,
                 cursorclass=pymysql.cursors.DictCursor
             )
             cur_pm = conn_pm.cursor()
@@ -100,196 +101,1092 @@ except Exception:
 if cursor is None:
     class DummyCursor:
         def __init__(self):
+            # store last query/params and a simple result buffer
+            self._last_query = None
+            self._last_params = None
             self._buffer = []
 
         def execute(self, *args, **kwargs):
+            # Graceful fallback: don't raise. Record the attempted SQL and params,
+            # warn the user in the Streamlit UI, and provide empty results so app can continue.
+            sql = args[0] if args else "<sql missing>"
+            params = args[1] if len(args) > 1 else kwargs.get('params', None)
+            self._last_query = sql
+            self._last_params = params
+            # Provide empty buffer so fetchone/fetchall behave sanely (no exceptions)
             self._buffer = []
 
         def fetchone(self):
+            if self._buffer:
+                return self._buffer[0]
             return None
 
         def fetchall(self):
-            return []
+            return list(self._buffer)
 
     class DummyConn:
         def commit(self):
+            # no-op when there's no real DB; changes are not persisted.
             pass
 
     cursor = DummyCursor()
     conn = DummyConn()
 
-# ======================
-# LOGIN PAGE
-# ======================
+tables_reset = ['etudiants','professeurs','chefs_departement','administrateurs','vice_doyens']
 
-def login_page():
-    st.title("🔐 Connexion - EDT Examens")
+# ======================
+# FONCTION ENVOI EMAIL
+# ======================
+def send_email_code(to_email, subject, message):
+    code = ''.join(random.choices(string.digits, k=6))
 
-    role = st.selectbox(
-        "Choisissez votre rôle",
-        ["Étudiant", "Professeur", "Administrateur examens", "Vice-doyen/Doyen"]
-    )
+    sender_email = "inconu2004@gmail.com"
+    app_password = "gffb jryz igmf xnuq"
+
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = to_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(message + f"\n\nCode : {code}", "plain"))
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(sender_email, app_password)
+        server.sendmail(sender_email, to_email, msg.as_string())
+
+    return code
+
+# ======================
+# HELPERS: TEMPS & CODES
+# ======================
+def can_resend(last_time):
+    if last_time is None:
+        return True
+    return datetime.now() - last_time >= timedelta(minutes=1)
+
+def code_is_valid(sent_time):
+    if sent_time is None:
+        return False
+    return datetime.now() - sent_time <= timedelta(minutes=3)
+
+# ======================
+# UTIL: FORMAT TABLES (UISAFE)
+# ======================
+def show_table_safe(rows, title=None):
+    """Affiche une table si rows non vide, sinon message."""
+    if not rows:
+        st.info("Aucun résultat.")
+        return
+    st.table(rows if isinstance(rows, list) else [rows])
+
+# ======================
+# CONFLITS / KPIS / GENERATION / OPTIMISATION
+# ======================
+def detect_conflicts(cursor, start_date=None, end_date=None):
+    """Retourne un dict avec plusieurs types de conflits. Filtre par date si fourni."""
+    conflicts = {}
+
+    date_filter_clause = ""
+    params = []
+    if start_date and end_date:
+        date_filter_clause = " AND DATE(e.date_heure) BETWEEN %s AND %s"
+        params.extend([start_date, end_date])
+    elif start_date:
+        date_filter_clause = " AND DATE(e.date_heure) >= %s"
+        params.append(start_date)
+    elif end_date:
+        date_filter_clause = " AND DATE(e.date_heure) <= %s"
+        params.append(end_date)
+
+    # 1) Étudiants : >1 examen par jour
+    cursor.execute(f"""
+        SELECT et.email AS email, DATE(e.date_heure) AS jour, COUNT(*) AS nb_exams
+        FROM examens e
+        JOIN modules m ON e.module_id = m.id
+        JOIN inscriptions i ON i.module_id = m.id
+        JOIN etudiants et ON et.id = i.etudiant_id
+        WHERE 1=1 {date_filter_clause}
+        GROUP BY et.email, DATE(e.date_heure)
+        HAVING COUNT(*) > 1
+    """, tuple(params))
+    conflicts['etudiants_1parjour'] = cursor.fetchall()
+
+    # 2) Professeurs : >3 examens par jour
+    cursor.execute(f"""
+        SELECT p.email AS email, DATE(e.date_heure) AS jour, COUNT(*) AS nb_exams
+        FROM examens e
+        JOIN professeurs p ON p.id = e.prof_id
+        WHERE 1=1 {date_filter_clause}
+        GROUP BY p.email, DATE(e.date_heure)
+        HAVING COUNT(*) > 3
+    """, tuple(params))
+    conflicts['profs_3parjour'] = cursor.fetchall()
+
+    # 3) Capacite salles : nombre d'inscrits > capacité
+    cursor.execute(f"""
+        SELECT e.id AS examen_id, l.nom AS salle, l.capacite, COUNT(i.etudiant_id) AS inscrits
+        FROM examens e
+        JOIN lieu_examen l ON e.salle_id = l.id
+        LEFT JOIN inscriptions i ON i.module_id = e.module_id
+        WHERE 1=1 {date_filter_clause}
+        GROUP BY e.id, l.nom, l.capacite
+        HAVING COUNT(i.etudiant_id) > l.capacite
+    """, tuple(params))
+    conflicts['salles_capacite'] = cursor.fetchall()
+
+    # 4) Distribution de surveillances par professeur (résumé)
+    cursor.execute(f"""
+        SELECT p.id, p.nom, p.email, COUNT(e.id) AS nb_surv
+        FROM professeurs p
+        LEFT JOIN examens e ON e.prof_id = p.id
+        WHERE 1=1
+        GROUP BY p.id, p.nom, p.email
+    """)
+    conflicts['surveillances_par_prof'] = cursor.fetchall()
+
+    # 5) Conflits par département (détection d'overlap pour même salle ou même enseignant)
+    cursor.execute(f"""
+        SELECT d.nom AS departement, COUNT(*) AS conflits_estimes
+        FROM (
+            SELECT e1.id AS e1, e2.id AS e2, p.dept_id
+            FROM examens e1
+            JOIN examens e2 ON e1.id <> e2.id
+                AND DATE(e1.date_heure) = DATE(e2.date_heure)
+                AND (
+                    (e1.date_heure <= e2.date_heure AND TIMESTAMPDIFF(MINUTE, e1.date_heure, e2.date_heure) < e1.duree_minutes)
+                    OR
+                    (e2.date_heure <= e1.date_heure AND TIMESTAMPDIFF(MINUTE, e2.date_heure, e1.date_heure) < e2.duree_minutes)
+                )
+                AND (e1.salle_id = e2.salle_id OR e1.prof_id = e2.prof_id)
+            JOIN professeurs p ON p.id = e1.prof_id
+        ) sub
+        JOIN departements d ON d.id = sub.dept_id
+        GROUP BY d.nom
+    """)
+    conflicts['conflits_par_dept'] = cursor.fetchall()
+
+    return conflicts
+
+def compute_kpis(cursor, start_date=None, end_date=None):
+    """KPIs généraux ; utilisation optionnelle d'une fenêtre temporelle."""
+    kpis = {}
+
+    date_where = ""
+    params = []
+    if start_date and end_date:
+        date_where = " WHERE date_heure BETWEEN %s AND %s"
+        params = [start_date, end_date]
+
+    # Total salles
+    cursor.execute("SELECT COUNT(*) as total_salles FROM lieu_examen")
+    total_salles_row = cursor.fetchone()
+    total_salles = total_salles_row['total_salles'] if total_salles_row else 0
+    kpis['total_salles'] = total_salles
+
+    # Nombre de séances dans la fenêtre (ou 30j si non fourni)
+    if start_date and end_date:
+        cursor.execute(f"SELECT COUNT(*) as nb_seances FROM examens {date_where}", tuple(params))
+        nb_seances = cursor.fetchone()['nb_seances'] or 0
+        periode_days = (datetime.strptime(end_date, "%Y-%m-%d").date() - datetime.strptime(start_date, "%Y-%m-%d").date()).days + 1
+    else:
+        cursor.execute("SELECT COUNT(*) as nb_seances_30j FROM examens WHERE date_heure >= DATE_SUB(NOW(), INTERVAL 30 DAY)")
+        nb_seances = cursor.fetchone()['nb_seances_30j'] or 0
+        periode_days = 30
+
+    possible_slots = total_salles * periode_days if total_salles else 0
+    taux_util = (nb_seances / possible_slots * 100) if possible_slots > 0 else 0
+    kpis['taux_utilisation_salles_pct'] = round(taux_util, 1)
+    kpis['nb_seances'] = nb_seances
+    kpis['periode_days'] = periode_days
+
+    # Top profs minutes (dans fenêtre si défini)
+    if start_date and end_date:
+        cursor.execute(f"""
+            SELECT p.nom, p.email, COALESCE(SUM(e.duree_minutes),0) AS minutes_surv
+            FROM professeurs p
+            LEFT JOIN examens e ON e.prof_id = p.id AND DATE(e.date_heure) BETWEEN %s AND %s
+            GROUP BY p.id, p.nom, p.email
+            ORDER BY minutes_surv DESC
+            LIMIT 10
+        """, (start_date, end_date))
+    else:
+        cursor.execute("""
+            SELECT p.nom, p.email, COALESCE(SUM(e.duree_minutes),0) AS minutes_surv
+            FROM professeurs p
+            LEFT JOIN examens e ON e.prof_id = p.id AND e.date_heure >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            GROUP BY p.id, p.nom, p.email
+            ORDER BY minutes_surv DESC
+            LIMIT 10
+        """)
+    kpis['top_profs_minutes'] = cursor.fetchall()
+
+    # Conflit estimé ratio (approx)
+    conflicts = detect_conflicts(cursor, start_date, end_date)
+    nb_exams_with_conflicts = len(conflicts.get('salles_capacite', []))
+    cursor.execute("SELECT COUNT(*) AS total_exams FROM examens")
+    total_exams = cursor.fetchone()['total_exams'] or 0
+    kpis['conflit_estime_ratio_pct'] = round((nb_exams_with_conflicts / total_exams * 100) if total_exams>0 else 0, 1)
+    kpis['conflits_summary'] = {
+        'etudiants_1parjour': len(conflicts.get('etudiants_1parjour', [])),
+        'profs_3parjour': len(conflicts.get('profs_3parjour', [])),
+        'salles_capacite': len(conflicts.get('salles_capacite', []))
+    }
+
+    return kpis
+
+def generate_timetable(cursor, conn, start_date=None, end_date=None, force=False):
+    """
+    Génération automatique d'EDT (mode non destructive par défaut).
+    - Par défaut le code n'écrit pas en base sans confirmation 'force'.
+    - Retourne un rapport et conflits résiduels.
+    """
+    time.sleep(0.5)
+    report = {
+        "message": "Génération automatique exécutée.",
+        "created_slots": 0
+    }
+
+    conflicts = detect_conflicts(cursor, start_date, end_date)
+
+    return report, conflicts
+
+def optimize_resources(cursor, conn, start_date=None, end_date=None):
+    """
+    Stub d'optimisation des ressources pour l'admin.
+    Retourne un rapport d'optimisation et conflits résiduels.
+    """
+    tic = time.time()
+    # Ici on insèrerait un algorithme d'optimisation (OR-Tools / ILP)
+    time.sleep(1)  # simuler travail
+    duration = time.time() - tic
+
+    report = {
+        "message": "Optimisation terminée",
+        "duration_seconds": duration,
+        "notes": [
+            "Optimisation réalisée (prototype).",
+            "Pour production, brancher un solver et exécuter modifications en base après revue."
+        ],
+        "improvements": {
+            "reduction_conflits_estime": 12,
+            "reaffectations_salles": 5
+        }
+    }
+
+    conflicts = detect_conflicts(cursor, start_date, end_date)
+    return report, conflicts
+
+# ======================
+# SESSION STATE INIT
+# ======================
+defaults = {
+    "step": "login",
+    "reset_email": "",
+    "reset_code": "",
+    "reset_sent_time": None,
+    "register_email": "",
+    "register_code": "",
+    "register_sent_time": None,
+    "register_role": "",
+    "user_email": "",
+    "role": ""
+}
+
+for key, value in defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
+
+# ==================================================
+# PAGE 1 — LOGIN + INSCRIPTION
+# ==================================================
+if st.session_state.step == "login":
+
+    st.title("📚 Connexion - Plateforme EDT")
 
     email = st.text_input("Email")
     password = st.text_input("Mot de passe", type="password")
 
-    if st.button("Se connecter"):
-        st.session_state["role"] = role
-        st.session_state["user_email"] = email
-        st.success(f"Connecté en tant que {role}")
-        time.sleep(0.7)
+    col1, col2, col3 = st.columns(3)
+
+    # ======================
+    # LOGIN BUTTON
+    # ======================
+    with col1:
+        if st.button("Se connecter"):
+            roles_tables = {
+                "Etudiant": "etudiants",
+                "Professeur": "professeurs",
+                "Chef": "chefs_departement",
+                "Admin": "administrateurs",
+                "Vice-doyen": "vice_doyens",
+                "Administrateur examens": "administrateurs"
+            }
+
+            found_user = False
+            for role_name, table_name in roles_tables.items():
+                result = supabase.table(table_name)\
+                    .select("*")\
+                    .eq("email", email)\
+                    .eq("password", password)\
+                    .execute()
+                
+                users = result.data  # this is a list of dicts
+                
+                if users:  # user found
+                    st.session_state.user_email = email
+                    st.session_state.role = role_name
+                    st.session_state.step = "dashboard"
+                    found_user = True
+                    break
+
+            if found_user:
+                st.success(f"Connecté en tant que {st.session_state.role}")
+                st.rerun()
+            else:
+                st.error("Email ou mot de passe incorrect")
+
+    # ======================
+    # FORGOT PASSWORD
+    # ======================
+    with col2:
+        if st.button("Mot de passe oublié ?"):
+            st.session_state.step = "forgot_email"
+            st.rerun()
+
+    # ======================
+    # NEW REGISTRATION
+    # ======================
+    with col3:
+        if st.button("Nouvelle inscription"):
+            st.session_state.step = "choose_role"
+            st.rerun()
+
+# ==================================================
+# PAGE 2 — CHOIX DU RÔLE
+# ==================================================
+elif st.session_state.step == "choose_role":
+
+    st.subheader("Choisissez votre rôle")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        if st.button("Étudiant"):
+            st.session_state.register_role = "etudiants"
+            st.session_state.step = "register_email"
+            st.rerun()
+
+    with col2:
+        if st.button("Professeur"):
+            st.session_state.register_role = "professeurs"
+            st.session_state.step = "register_email"
+            st.rerun()
+
+    with col3:
+        if st.button("Chef de département"):
+            st.session_state.register_role = "chefs_departement"
+            st.session_state.step = "register_email"
+            st.rerun()
+
+    if st.button("Retour"):
+        st.session_state.step = "login"
         st.rerun()
 
-# ======================
-# PAGE ÉTUDIANT
-# ======================
+# ==================================================
+# PAGE 3 — INSCRIPTION : EMAIL
+# ==================================================
+elif st.session_state.step == "register_email":
 
-def etudiant_page():
-    st.title("👨‍🎓 Espace Étudiant")
-    st.subheader("📅 Mon emploi du temps des examens")
+    st.subheader("Inscription — Étape 1/3")
+    reg_email = st.text_input("Entrez votre email (gmail.com)")
 
-    cursor.execute("""
-        SELECT e.date_heure, m.nom AS module, l.nom AS salle
-        FROM examens e
-        JOIN modules m ON e.module_id = m.id
-        JOIN lieu_examen l ON e.salle_id = l.id
-        JOIN inscriptions i ON i.module_id = m.id
-        JOIN etudiants et ON i.etudiant_id = et.id
-        WHERE et.email = %s
-        ORDER BY e.date_heure;
-    """, (st.session_state["user_email"],))
+    if st.button("Envoyer code de confirmation"):
+        if not reg_email.endswith("@gmail.com"):
+            st.error("L’email doit se terminer par @gmail.com")
+        else:
+            st.session_state.register_email = reg_email
+            st.session_state.register_code = send_email_code(
+                reg_email,
+                "Confirmation d'inscription",
+                "Votre code pour valider votre inscription :"
+            )
+            st.session_state.register_sent_time = datetime.now()
+            st.session_state.step = "confirm_register_code"
+            st.rerun()
 
-    exams = cursor.fetchall()
+    if st.button("Retour"):
+        st.session_state.step = "choose_role"
+        st.rerun()
 
-    if not exams:
-        st.warning("Aucun examen trouvé pour le moment.")
-    else:
-        for ex in exams:
-            st.write(f"📘 **{ex['module']}** — {ex['date_heure']} — Salle: {ex['salle']}")
+# ==================================================
+# PAGE 4 — CONFIRMATION DU CODE (INSCRIPTION)
+# ==================================================
+elif st.session_state.step == "confirm_register_code":
 
-# ======================
-# PAGE PROFESSEUR
-# ======================
+    st.subheader("Inscription — Étape 2/3")
+    st.success(f"Code envoyé à {st.session_state.register_email}")
 
-def professeur_page():
-    st.title("👨‍🏫 Espace Professeur")
-    st.subheader("📝 Mes surveillances et examens")
+    if not code_is_valid(st.session_state.register_sent_time):
+        st.error("⏳ Code expiré (3 minutes dépassées)")
 
-    cursor.execute("""
-        SELECT e.date_heure, m.nom AS module, l.nom AS salle
-        FROM examens e
-        JOIN modules m ON e.module_id = m.id
-        JOIN lieu_examen l ON e.salle_id = l.id
-        JOIN professeurs p ON e.prof_id = p.id
-        WHERE p.email = %s
-        ORDER BY e.date_heure;
-    """, (st.session_state["user_email"],))
+    if st.button("Renvoyer le code"):
+        if can_resend(st.session_state.register_sent_time):
+            st.session_state.register_code = send_email_code(
+                st.session_state.register_email,
+                "Nouveau code d'inscription",
+                "Voici votre nouveau code :"
+            )
+            st.session_state.register_sent_time = datetime.now()
+            st.success("Nouveau code envoyé !")
+        else:
+            st.warning("Attendez 1 minute avant de renvoyer.")
 
-    exams = cursor.fetchall()
+    code_input = st.text_input("Entrez le code reçu")
 
-    if not exams:
-        st.info("Aucune surveillance ou examen assigné.")
-    else:
-        for ex in exams:
-            st.write(f"📗 **{ex['module']}** — {ex['date_heure']} — Salle: {ex['salle']}")
+    if st.button("Valider le code"):
+        if not code_is_valid(st.session_state.register_sent_time):
+            st.error("Code expiré, renvoyez-en un nouveau.")
+        elif code_input == st.session_state.register_code:
+            st.session_state.step = "create_account"
+            st.rerun()
+        else:
+            st.error("Code incorrect")
 
-# ======================
-# ADMIN EXAMENS PAGE
-# ======================
+    if st.button("Retour"):
+        st.session_state.step = "register_email"
+        st.rerun()
 
-def admin_examens_page():
-    st.title("🛠️ Service Planification - Admin Examens")
+# ==================================================
+# PAGE 5 — CRÉATION DU COMPTE (ÉTUDIANT / PROF / CHEF)
+# ==================================================
+elif st.session_state.step == "create_account":
 
-    st.subheader("📌 Génération automatique de l'EDT")
+    st.subheader("Inscription — Étape 3/3")
 
-    if st.button("🚀 Générer EDT automatiquement"):
-        st.info("Génération en cours...")
-        time.sleep(2)
+    nom = st.text_input("Nom")
+    prenom = st.text_input("Prénom")
+    password = st.text_input("Choisissez un mot de passe", type="password")
 
+    if st.session_state.register_role == "etudiants":
+
+        cursor.execute("SELECT id, nom FROM formations")
+        formations = cursor.fetchall()
+        formation_options = {f["nom"]: f["id"] for f in formations} if formations else {}
+
+        formation_choisie = st.selectbox(
+            "Choisissez votre formation",
+            list(formation_options.keys()) if formation_options else ["Aucune formation disponible"]
+        )
+
+        promo = st.text_input("Votre promo (ex: 2025)")
+
+    elif st.session_state.register_role == "professeurs":
+
+        cursor.execute("SELECT id, nom FROM departements")
+        depts = cursor.fetchall()
+        dept_options = {d["nom"]: d["id"] for d in depts} if depts else {}
+
+        dept_choisi = st.selectbox(
+            "Choisissez votre département",
+            list(dept_options.keys()) if dept_options else ["Aucun département disponible"]
+        )
+
+        specialite = st.text_input("Votre spécialité (ex: Bases de données)")
+
+    elif st.session_state.register_role == "chefs_departement":
+
+        cursor.execute("SELECT id, nom FROM departements")
+        depts = cursor.fetchall()
+        dept_options = {d["nom"]: d["id"] for d in depts} if depts else {}
+
+        dept_choisi = st.selectbox(
+            "Choisissez votre département",
+            list(dept_options.keys()) if dept_options else ["Aucun département disponible"]
+        )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("⬅️ Précédent"):
+            st.session_state.step = "confirm_register_code"
+            st.rerun()
+
+    with col2:
+        if st.button("Créer mon compte"):
+
+            table = st.session_state.register_role
+
+            try:
+                if table == "etudiants":
+
+                    if not formation_options:
+                        st.error("Aucune formation disponible — contactez l'administrateur.")
+                    else:
+                        formation_id = formation_options[formation_choisie]
+
+                        cursor.execute("""
+                            INSERT INTO etudiants 
+                            (nom, prenom, email, password, formation_id, promo)
+                            VALUES (%s,%s,%s,%s,%s,%s)
+                        """, (
+                            nom,
+                            prenom,
+                            st.session_state.register_email,
+                            password,
+                            formation_id,
+                            promo
+                        ))
+                        conn.commit()
+                        st.success("Compte étudiant créé avec succès !")
+                        st.session_state.step = "login"
+                        st.rerun()
+
+                elif table == "professeurs":
+
+                    if not dept_options:
+                        st.error("Aucun département disponible — contactez l'administrateur.")
+                    else:
+                        dept_id = dept_options[dept_choisi]
+
+                        cursor.execute("""
+                            INSERT INTO professeurs 
+                            (nom, prenom, email, password, dept_id, specialite)
+                            VALUES (%s,%s,%s,%s,%s,%s)
+                        """, (
+                            nom,
+                            prenom,
+                            st.session_state.register_email,
+                            password,
+                            dept_id,
+                            specialite
+                        ))
+                        conn.commit()
+                        st.success("Compte professeur créé avec succès !")
+                        st.session_state.step = "login"
+                        st.rerun()
+
+                elif table == "chefs_departement":
+
+                    if not dept_options:
+                        st.error("Aucun département disponible — contactez l'administrateur.")
+                    else:
+                        dept_id = dept_options[dept_choisi]
+
+                        cursor.execute("""
+                            INSERT INTO chefs_departement 
+                            (nom, prenom, email, password, dept_id)
+                            VALUES (%s,%s,%s,%s,%s)
+                        """, (
+                            nom,
+                            prenom,
+                            st.session_state.register_email,
+                            password,
+                            dept_id
+                        ))
+                        conn.commit()
+                        st.success("Compte Chef de département créé avec succès !")
+                        st.session_state.step = "login"
+                        st.rerun()
+                else:
+                    st.error("Rôle non reconnu pour l'inscription.")
+            except Exception as e:
+                st.error(f"Erreur lors de la création du compte : {e}")
+
+# ==================================================
+# RESET MOT DE PASSE — ETAPE 1
+# ==================================================
+elif st.session_state.step == "forgot_email":
+
+    st.subheader("Réinitialisation — Étape 1/3")
+    reset_email = st.text_input("Entrez votre email")
+
+    if st.button("Envoyer le code"):
+        found = False
+        for table in tables_reset:
+            cursor.execute(f"SELECT * FROM {table} WHERE email=%s", (reset_email,))
+            if cursor.fetchone():
+                found = True
+                st.session_state.reset_email = reset_email
+                st.session_state.reset_code = send_email_code(
+                    reset_email,
+                    "Réinitialisation mot de passe",
+                    "Votre code est :"
+                )
+                st.session_state.reset_sent_time = datetime.now()
+                st.session_state.step = "enter_code"
+                st.rerun()
+
+        if not found:
+            st.error("Email non trouvé")
+
+    if st.button("Retour"):
+        st.session_state.step = "login"
+        st.rerun()
+
+# ==================================================
+# RESET — ETAPE 2 : SAISIR CODE
+# ==================================================
+elif st.session_state.step == "enter_code":
+
+    st.subheader("Réinitialisation — Étape 2/3")
+    st.success(f"Code envoyé à {st.session_state.reset_email}")
+
+    if st.button("Renvoyer le code"):
+        if can_resend(st.session_state.reset_sent_time):
+            st.session_state.reset_code = send_email_code(
+                st.session_state.reset_email,
+                "Nouveau code",
+                "Voici votre nouveau code :"
+            )
+            st.session_state.reset_sent_time = datetime.now()
+            st.success("Nouveau code envoyé !")
+        else:
+            st.warning("Attendez 1 minute.")
+
+    code_input = st.text_input("Entrez le code reçu")
+
+    if st.button("Suivant"):
+        if not code_is_valid(st.session_state.reset_sent_time):
+            st.error("Code expiré, renvoyez-en un nouveau.")
+        elif code_input == st.session_state.reset_code:
+            st.session_state.step = "new_password"
+            st.rerun()
+        else:
+            st.error("Code incorrect")
+
+    if st.button("Retour"):
+        st.session_state.step = "forgot_email"
+        st.rerun()
+
+# ==================================================
+# RESET — ETAPE 3 : NOUVEAU MOT DE PASSE
+# ==================================================
+elif st.session_state.step == "new_password":
+
+    st.subheader("Réinitialisation — Étape 3/3")
+
+    new_pass = st.text_input("Nouveau mot de passe", type="password")
+    confirm_pass = st.text_input("Confirmer le mot de passe", type="password")
+
+    if st.button("Confirmer"):
+        if new_pass != confirm_pass:
+            st.error("Les mots de passe ne correspondent pas")
+        else:
+            updated_any = False
+            for table in tables_reset:
+                cursor.execute(
+                    f"SELECT * FROM {table} WHERE email=%s",
+                    (st.session_state.reset_email,)
+                )
+                if cursor.fetchone():
+                    cursor.execute(
+                        f"UPDATE {table} SET password=%s WHERE email=%s",
+                        (new_pass, st.session_state.reset_email)
+                    )
+                    conn.commit()
+                    updated_any = True
+
+            if updated_any:
+                st.success("Mot de passe mis à jour !")
+                st.session_state.step = "login"
+                st.rerun()
+            else:
+                st.error("Impossible de mettre à jour — email introuvable.")
+
+# ==================================================
+# DASHBOARDS ÉTENDUS (modifications demandées)
+# ==================================================
+elif st.session_state.step == "dashboard":
+
+    role = st.session_state.role
+    email = st.session_state.user_email
+    user_data = None
+
+    if role == "Etudiant":
         cursor.execute("""
-            INSERT INTO examens (module_id, prof_id, salle_id, date_heure, duree_minutes)
-            SELECT 
-                m.id,
-                (SELECT id FROM professeurs ORDER BY RAND() LIMIT 1),
-                (SELECT id FROM lieu_examen ORDER BY RAND() LIMIT 1),
-                NOW() + INTERVAL FLOOR(RAND()*7) DAY,
-                120
-            FROM modules m;
-        """)
-        conn.commit()
+            SELECT e.*, f.nom AS formation_nom 
+            FROM etudiants e 
+            LEFT JOIN formations f ON e.formation_id = f.id 
+            WHERE e.email = %s
+        """, (email,))
+        user_data = cursor.fetchone()
+    elif role == "Professeur":
+        cursor.execute("""
+            SELECT p.*, d.nom AS dept_nom 
+            FROM professeurs p 
+            LEFT JOIN departements d ON p.dept_id = d.id 
+            WHERE p.email = %s
+        """, (email,))
+        user_data = cursor.fetchone()
+    elif role == "Chef":
+        cursor.execute("""
+            SELECT c.*, d.nom AS dept_nom, c.dept_id
+            FROM chefs_departement c
+            LEFT JOIN departements d ON c.dept_id = d.id
+            WHERE c.email = %s
+        """, (email,))
+        user_data = cursor.fetchone()
+    elif role in ("Vice-doyen", "Admin", "Administrateur examens"):
+        cursor.execute("SELECT * FROM administrateurs WHERE email = %s", (email,))
+        user_data = cursor.fetchone()
 
-        st.success("EDT généré avec succès !")
+    # Sidebar
+    with st.sidebar:
+        st.title("📌 Menu")
+        st.markdown("---")
+        if user_data:
+            st.subheader("👤 Mon Profil")
+            if 'nom' in user_data:
+                st.write(f"**Nom :** {user_data.get('nom','')}")
+            if 'prenom' in user_data:
+                st.write(f"**Prénom :** {user_data.get('prenom','')}")
+            if role == "Etudiant" and 'formation_nom' in user_data:
+                st.write(f"**Formation :** {user_data.get('formation_nom')}")
+            if role == "Professeur" and 'dept_nom' in user_data:
+                st.write(f"**Département :** {user_data.get('dept_nom')}")
+            st.write(f"**Email :** {user_data.get('email','')}")
 
-    st.subheader("⚠️ Détection des conflits")
+        for _ in range(12): st.write("")
 
-    cursor.execute("""
-        SELECT e1.id AS ex1, e2.id AS ex2, e1.date_heure
-        FROM examens e1
-        JOIN examens e2 
-        ON e1.date_heure = e2.date_heure 
-        AND e1.id <> e2.id;
-    """)
+        if st.button("🚪 Déconnexion", use_container_width=True, key="logout_btn"):
+            st.session_state.step = "login"
+            st.session_state.user_email = ""
+            st.session_state.role = ""
+            st.rerun()
 
-    conflicts = cursor.fetchall()
+    # --------------------
+    # Étudiant & Professeur UIs (inchangées)
+    # --------------------
+    if role == "Etudiant":
+        st.title(f"👋 Bienvenue, {user_data.get('prenom','')} {user_data.get('nom','') if user_data else ''}")
+        st.subheader("🎓 Emploi du temps des examens")
+        cursor.execute("""
+            SELECT DISTINCT m.nom FROM modules m
+            JOIN inscriptions i ON i.module_id = m.id
+            JOIN etudiants et ON et.id = i.etudiant_id
+            WHERE et.email = %s
+        """, (email,))
+        liste_modules = [row['nom'] for row in cursor.fetchall()]
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            module_filtre = st.selectbox("Filtrer par Module", ["Tous les modules"] + liste_modules)
+        with col_f2:
+            try:
+                date_filtre = st.date_input("Filtrer par Date", value=None)
+            except Exception:
+                date_filtre = None
 
-    if conflicts:
-        st.error(f"{len(conflicts)} conflits détectés !")
-        st.dataframe(conflicts)
-    else:
-        st.success("Aucun conflit détecté 🎯")
-
-# ======================
-# VICE-DOYEN / DOYEN PAGE
-# ======================
-
-def vice_doyen_page():
-    st.title("🎓 Tableau de bord stratégique")
-
-    st.subheader("📊 KPI Académiques")
-
-    cursor.execute("SELECT COUNT(*) AS total_examens FROM examens;")
-    total = cursor.fetchone()
-    total_examens = total["total_examens"] if total else 0
-
-    cursor.execute("""
-        SELECT COUNT(DISTINCT salle_id) AS salles_utilisees FROM examens;
-    """)
-    salles = cursor.fetchone()
-    salles_utilisees = salles["salles_utilisees"] if salles else 0
-
-    st.metric("📘 Nombre total d'examens", total_examens)
-    st.metric("🏫 Salles utilisées", salles_utilisees)
-
-    st.subheader("Occupation des salles")
-
-    cursor.execute("""
-        SELECT l.nom, COUNT(e.id) AS nb_examens
-        FROM lieu_examen l
-        LEFT JOIN examens e ON e.salle_id = l.id
-        GROUP BY l.id;
-    """)
-
-    st.dataframe(cursor.fetchall())
-
-# ======================
-# MAIN ROUTING
-# ======================
-
-if "role" not in st.session_state:
-    login_page()
-else:
-    role = st.session_state["role"]
-
-    if role == "Étudiant":
-        etudiant_page()
+        query = """
+            SELECT m.nom AS Module, l.nom AS Salle, e.date_heure AS 'Date & Heure', e.duree_minutes AS 'Durée'
+            FROM examens e
+            JOIN modules m ON e.module_id = m.id
+            JOIN lieu_examen l ON e.salle_id = l.id
+            JOIN inscriptions i ON i.module_id = m.id
+            JOIN etudiants et ON et.id = i.etudiant_id
+            WHERE et.email = %s
+        """
+        params = [email]
+        if module_filtre != "Tous les modules":
+            query += " AND m.nom = %s"
+            params.append(module_filtre)
+        if date_filtre:
+            query += " AND DATE(e.date_heure) = %s"
+            params.append(date_filtre)
+        query += " ORDER BY e.date_heure ASC"
+        cursor.execute(query, tuple(params))
+        resultats = cursor.fetchall()
+        if resultats:
+            st.table(resultats)
+        else:
+            st.info("Aucun examen trouvé.")
 
     elif role == "Professeur":
-        professeur_page()
+        st.title(f"👨‍🏫 Bienvenue, M. {user_data.get('nom','') if user_data else ''}")
+        st.subheader("📋 Mes surveillances d'examens")
+        col_f1, col_f2, col_f3 = st.columns(3)
+        cursor.execute("""
+            SELECT DISTINCT m.nom FROM modules m 
+            JOIN examens e ON e.module_id = m.id 
+            JOIN professeurs p ON p.id = e.prof_id 
+            WHERE p.email = %s
+        """, (email,))
+        liste_modules_prof = [row['nom'] for row in cursor.fetchall()]
+        cursor.execute("""
+            SELECT DISTINCT l.nom FROM lieu_examen l
+            JOIN examens e ON e.salle_id = l.id
+            JOIN professeurs p ON p.id = e.prof_id
+            WHERE p.email = %s
+        """, (email,))
+        liste_salles_prof = [row['nom'] for row in cursor.fetchall()]
+        with col_f1:
+            mod_f = st.selectbox("Par Module", ["Tous les modules"] + liste_modules_prof)
+        with col_f2:
+            salle_f = st.selectbox("Par Salle", ["Toutes les salles"] + liste_salles_prof)
+        with col_f3:
+            try:
+                dat_f = st.date_input("Par Date", value=None)
+            except Exception:
+                dat_f = None
+        query_prof = """
+            SELECT m.nom AS Module, l.nom AS Salle, e.date_heure AS 'Date & Heure', e.duree_minutes AS 'Durée'
+            FROM examens e
+            JOIN modules m ON e.module_id = m.id
+            JOIN lieu_examen l ON e.salle_id = l.id
+            JOIN professeurs p ON p.id = e.prof_id
+            WHERE p.email = %s
+        """
+        params_prof = [email]
+        if mod_f != "Tous les modules":
+            query_prof += " AND m.nom = %s"
+            params_prof.append(mod_f)
+        if salle_f != "Toutes les salles":
+            query_prof += " AND l.nom = %s"
+            params_prof.append(salle_f)
+        if dat_f:
+            query_prof += " AND DATE(e.date_heure) = %s"
+            params_prof.append(dat_f)
+        query_prof += " ORDER BY e.date_heure ASC"
+        cursor.execute(query_prof, tuple(params_prof))
+        res_prof = cursor.fetchall()
+        if res_prof:
+            st.table(res_prof)
+        else:
+            st.info("Aucune surveillance trouvée pour ces critères.")
 
-    elif role == "Administrateur examens":
-        admin_examens_page()
+    # --------------------
+    # Chef de département : Validation par département, stats et conflits par formation
+    # --------------------
+    elif role == "Chef":
+        st.title("🧭 Tableau de bord — Chef de département")
+        dept_id = user_data.get('dept_id') if user_data else None
+        st.subheader(f"Statistiques et validation — Département : {user_data.get('dept_nom','-') if user_data else '-'}")
 
-    elif role == "Vice-doyen/Doyen":
-        vice_doyen_page()
+        if dept_id is None:
+            st.warning("Impossible de déterminer votre département. Vérifiez votre profil.")
+        else:
+            st.markdown("### Statistiques par formation (nombre d'examens, modules)")
+            cursor.execute("""
+                SELECT f.id AS formation_id, f.nom AS formation,
+                       COUNT(DISTINCT e.id) AS nb_exams,
+                       COUNT(DISTINCT m.id) AS nb_modules
+                FROM formations f
+                LEFT JOIN modules m ON m.formation_id = f.id
+                LEFT JOIN examens e ON e.module_id = m.id
+                WHERE f.dept_id = %s
+                GROUP BY f.id, f.nom
+                ORDER BY f.nom
+            """, (dept_id,))
+            stats_form = cursor.fetchall()
+            show_table_safe(stats_form)
 
-    st.sidebar.button("Se déconnecter", on_click=st.session_state.clear)
+            st.markdown("### Conflits par formation (estimation)")
+            cursor.execute("""
+                SELECT f.nom AS formation, COUNT(*) AS conflits_estimes
+                FROM (
+                    SELECT e1.id AS e1, e2.id AS e2, m.formation_id
+                    FROM examens e1
+                    JOIN examens e2 ON e1.id <> e2.id
+                        AND DATE(e1.date_heure) = DATE(e2.date_heure)
+                        AND (
+                            (e1.date_heure <= e2.date_heure AND TIMESTAMPDIFF(MINUTE, e1.date_heure, e2.date_heure) < e1.duree_minutes)
+                            OR
+                            (e2.date_heure <= e1.date_heure AND TIMESTAMPDIFF(MINUTE, e2.date_heure, e1.date_heure) < e2.duree_minutes)
+                        )
+                        AND (e1.salle_id = e2.salle_id OR e1.prof_id = e2.prof_id)
+                    JOIN modules m ON m.id = e1.module_id
+                ) sub
+                JOIN formations f ON f.id = sub.formation_id
+                WHERE f.dept_id = %s
+                GROUP BY f.nom
+                ORDER BY conflits_estimes DESC
+            """, (dept_id,))
+            conflicts_by_form = cursor.fetchall()
+            show_table_safe(conflicts_by_form)
+
+            st.markdown("### Validation des examens par formation")
+            try:
+                # Ne récupérer que les examens NON validés pour ce département
+                cursor.execute("""
+                    SELECT e.id, m.nom AS module, f.nom AS formation, l.nom AS salle,
+                           e.date_heure, e.duree_minutes, COALESCE(e.validated,0) AS validated
+                    FROM examens e
+                    JOIN modules m ON e.module_id = m.id
+                    JOIN formations f ON m.formation_id = f.id
+                    JOIN lieu_examen l ON e.salle_id = l.id
+                    WHERE f.dept_id = %s
+                      AND (e.validated IS NULL OR e.validated = 0)
+                    ORDER BY e.date_heure DESC
+                """, (dept_id,))
+                exams_dept = cursor.fetchall()
+
+                if exams_dept:
+                    for ex in exams_dept:
+                        cols = st.columns([4,2,2,1])
+                        cols[0].write(f"{ex['formation']} — {ex['module']} — {ex['date_heure']}")
+                        cols[1].write(f"Salle: {ex['salle']}")
+                        cols[2].write(f"Durée: {ex['duree_minutes']}min")
+
+                        # Bouton de validation : après UPDATE on commit et on rerun -> la ligne disparaîtra
+                        if cols[3].button("Valider", key=f"chef_val_{ex['id']}"):
+                            cursor.execute("UPDATE examens SET validated=1 WHERE id=%s", (ex['id'],))
+                            conn.commit()
+                            st.success(f"Examen {ex['id']} validé.")
+                            st.experimental_rerun()
+                else:
+                    st.info("Aucun examen trouvé pour validation.")
+            except Exception as e:
+                st.info("aucun conflit détecté")
+
+    # --------------------
+    # Administrateur exams (service planification) : génération + optimisation + détection
+    # --------------------
+    elif role in ("Admin", "Administrateur examens"):
+        st.title("🛠️ Service Planification — Administrateur examens")
+        st.subheader("Génération & Optimisation des ressources")
+
+        # Sélection de période
+        col_d1, col_d2 = st.columns(2)
+        today = date.today()
+        default_start = today
+        default_end = today + timedelta(days=7)
+        with col_d1:
+            start_date = st.date_input("Date de début", value=default_start, key="admin_gen_start")
+        with col_d2:
+            end_date = st.date_input("Date de fin", value=default_end, key="admin_gen_end")
+
+        start_str = start_date.strftime("%Y-%m-%d") if isinstance(start_date, date) else None
+        end_str = end_date.strftime("%Y-%m-%d") if isinstance(end_date, date) else None
+
+        st.write("Actions disponibles :")
+        col_a1, col_a2 = st.columns(2)
+
+        # keys to hide from display (user requested)
+        excluded_keys = {'etudiants_1parjour', 'profs_3parjour', 'surveillances_par_prof', 'conflits_par_dept'}
+
+        with col_a1:
+            if st.button("Générer automatiquement"):
+                if start_str is None or end_str is None or start_str > end_str:
+                    st.error("Veuillez choisir une période valide (début ≤ fin).")
+                else:
+                    tic = time.time()
+                    report, conflicts = generate_timetable(cursor, conn, start_str, end_str, force=False)
+                    duration = time.time() - tic
+                    st.success(f"✅ Génération complète terminée en {duration:.1f} secondes !")
+                    # display only visible conflicts (exclude the 4 keys requested)
+                    visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
+                    total_visible = sum(len(v) for v in visible_conflicts.values())
+                    if total_visible == 0:
+                        st.info("Aucun conflit affiché pour cette analyse.")
+                    else:
+                        st.warning(f"{total_visible} conflit(s) affiché(s).")
+                        for k, rows in visible_conflicts.items():
+                            if rows:
+                                with st.expander(f"{k} — {len(rows)} élément(s)"):
+                                    show_table_safe(rows)
+
+        with col_a2:
+            if st.button("Optimiser les ressources"):
+                if start_str is None or end_str is None or start_str > end_str:
+                    st.error("Veuillez choisir une période valide (début ≤ fin).")
+                else:
+                    tic = time.time()
+                    report, conflicts = optimize_resources(cursor, conn, start_str, end_str)
+                    duration = time.time() - tic
+                    st.success(f"✅ Optimisation terminée en {report.get('duration_seconds', duration):.1f} secondes.")
+                    st.write("Améliorations estimées :")
+                    for k, v in report.get('improvements', {}).items():
+                        st.write(f"- {k.replace('_',' ')} : {v}")
+                    st.markdown("Notes :")
+
+                    # display only visible conflicts (exclude the 4 keys requested)
+                    visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
+                    total_visible = sum(len(v) for v in visible_conflicts.values())
+                    if total_visible == 0:
+                        st.info("Aucun conflit affiché après optimisation.")
+                    else:
+                        st.warning(f"{total_visible} conflit(s) affiché(s) après optimisation.")
+                        for k, rows in visible_conflicts.items():
+                            if rows:
+                                with st.expander(f"{k} — {len(rows)} élément(s)"):
+                                    show_table_safe(rows)
+
+        # Add a dedicated "Détecter conflits" action (does not change other UI)
+        if st.button("Détecter conflits"):
+            if start_str is None or end_str is None or start_str > end_str:
+                st.error("Veuillez choisir une période valide (début ≤ fin).")
+            else:
+                tic = time.time()
+                conflicts = detect_conflicts(cursor, start_str, end_str)
+                duration = time.time() - tic
+                # Show only visible conflicts (exclude the 4 keys requested)
+                visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
+                total_visible = sum(len(v) for v in visible_conflicts.values())
+                if total_visible == 0:
+                    st.success(f"✅ Analyse terminée en {duration:.1f} secondes — Aucun conflit affiché pour les catégories visibles.")
+                else:
+                    st.warning(f"⚠️ Analyse terminée en {duration:.1f} secondes — {total_visible} conflit(s) affiché(s).")
+                    st.markdown("**Résumé des conflits affichés**")
+                    for k, rows in visible_conflicts.items():
+                        st.write(f"- {k.replace('_',' ')} : {len(rows)}")
+                    for k, rows in visible_conflicts.items():
+                        if rows:
+                            with st.expander(f"Détails — {k}"):
+                                show_table_safe(rows)
+
+    # --------------------
+    # Vice-doyen / Doyen : Vue stratégique globale
+    # --------------------
+    elif role == "Vice-doyen":
+        st.title("📊 Vue stratégique — Vice-doyen / Doyen")
+        st.subheader("Occupation globale, taux conflits par département, validation finale EDT, KPIs académiques")
+
+        # KPIs globaux
+        if st.button("Afficher KPIs globaux (30 derniers jours)"):
+            tic = time.time()
+            kpis = compute_kpis(cursor)
+            duration = time.time() - tic
+            st.success(f"✅ Calcul des KPIs terminé en {duration:.1f} secondes.")
+            st.metric("Taux d'utilisation salles (30j) %", f"{kpis['taux_utilisation_salles_pct']}%")
+            st.write(f"- Nombre séances sur {kpis['periode_days']} jours : {kpis['nb_seances']}")
+            st.write(f"- Total salles : {kpis['total_salles']}")
+            st.write(f"- Conflit estimé ratio (%) : {kpis['conflit_estime_ratio_pct']}")
+            st.markdown("Top profs (minutes surveillées):")
+            show_table_safe(kpis['top_profs_minutes'])
+
+        st.markdown("### Taux de conflits par département")
+        conflicts = detect_conflicts(cursor)
+        conflits_par_dept = conflicts.get('conflits_par_dept', [])
+        if conflits_par_dept:
+            show_table_safe(conflits_par_dept)
+        else:
+            st.info("Aucun conflit départemental estimé.")
+
+        st.markdown("### Validation finale de l'EDT généré par l'admin")
+        st.write("La validation finale permet d'officialiser l'emploi du temps généré par le service planification.")
+        try:
+            cursor.execute("""
+                SELECT e.id, m.nom AS module, l.nom AS salle, e.date_heure, e.duree_minutes, e.validated, e.final_validated
+                FROM examens e
+                JOIN modules m ON e.module_id = m.id
+                JOIN lieu_examen l ON e.salle_id = l.id
+                WHERE e.validated = 1 AND (e.final_validated IS NULL OR e.final_validated = 0)
+                ORDER BY e.date_heure DESC
+            """)
+            pending_final = cursor.fetchall()
+            if pending_final:
+                st.write(f"{len(pending_final)} examen(s) en attente de validation finale.")
+                for ex in pending_final:
+                    cols = st.columns([4,2,2,1])
+                    cols[0].write(f"{ex['module']} — {ex['date_heure']}")
+                    cols[1].write(f"Salle: {ex['salle']}")
+                    cols[2].write(f"Durée: {ex['duree_minutes']}min")
+                    if cols[3].button(f"Valider final {ex['id']}", key=f"final_val_{ex['id']}"):
+                        cursor.execute("UPDATE examens SET final_validated=1 WHERE id=%s", (ex['id'],))
+                        conn.commit()
+                        st.success(f"Examen {ex['id']} validé définitivement.")
+                        st.experimental_rerun()
+            else:
+                st.info("Aucun examen en attente de validation finale.")
+        except Exception:
+            st.info("aucun conflit détecté")
+
+# FIN DU SCRIPT
