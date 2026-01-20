@@ -20,6 +20,107 @@ SUPABASE_URL = st.secrets["supabase"]["url"]
 SUPABASE_KEY = st.secrets["supabase"]["key"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# ======================
+# BACKWARDS COMPATIBILITY: cursor / conn
+# ======================
+# You mentioned you changed the cursor; many parts of the script still expect a DB
+# connection object `conn` and a DB cursor `cursor` with methods:
+#   - cursor.execute(sql, params)
+#   - cursor.fetchone()
+#   - cursor.fetchall()
+#   - conn.commit()
+#
+# This block attempts to create a real DB connection from st.secrets["db"] (or st.secrets["database"])
+# supporting psycopg2 (Postgres), mysql.connector, or pymysql. If no usable secrets/driver is found,
+# it provides a DummyCursor that gives clear runtime errors explaining how to configure secrets.
+#
+# To fully enable all DB operations provide st.secrets["db"] with keys:
+#   host, port, user, password, database, optional driver ("psycopg2" or "mysql" or "pymysql")
+#
+conn = None
+cursor = None
+
+def make_cursor_from_secrets():
+    db_secrets = st.secrets.get("db") or st.secrets.get("database") or {}
+    if not db_secrets:
+        return None, None
+
+    host = db_secrets.get("host")
+    port = db_secrets.get("port")
+    user = db_secrets.get("user")
+    password = db_secrets.get("password")
+    database = db_secrets.get("database") or db_secrets.get("dbname")
+    driver = (db_secrets.get("driver") or "auto").lower()
+
+    # Try psycopg2 / Postgres first if requested or auto
+    if driver in ("psycopg2", "postgres", "pg", "auto"):
+        try:
+            import psycopg2
+            import psycopg2.extras
+            conn_pg = psycopg2.connect(
+                host=host, port=port or 5432, user=user, password=password, dbname=database
+            )
+            cur_pg = conn_pg.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            return conn_pg, cur_pg
+        except Exception:
+            # fallthrough to try mysql drivers
+            pass
+
+    # Try mysql.connector
+    if driver in ("mysql", "mysql.connector", "auto"):
+        try:
+            import mysql.connector
+            conn_my = mysql.connector.connect(
+                host=host, port=int(port) if port else 3306, user=user, password=password, database=database
+            )
+            cur_my = conn_my.cursor(dictionary=True)
+            return conn_my, cur_my
+        except Exception:
+            pass
+
+    # Try pymysql
+    if driver in ("pymysql", "auto"):
+        try:
+            import pymysql
+            conn_pm = pymysql.connect(
+                host=host, port=int(port) if port else 3306, user=user, password=password, db=database,
+                cursorclass=pymysql.cursors.DictCursor
+            )
+            cur_pm = conn_pm.cursor()
+            return conn_pm, cur_pm
+        except Exception:
+            pass
+
+    return None, None
+
+try:
+    conn, cursor = make_cursor_from_secrets()
+except Exception:
+    conn, cursor = None, None
+
+if cursor is None:
+    class DummyCursor:
+        def execute(self, *args, **kwargs):
+            sql = args[0] if args else "<sql missing>"
+            raise RuntimeError(
+                "No working DB cursor available. To enable DB queries, add database credentials to Streamlit secrets under "
+                "`st.secrets['db']` with keys: host, port, user, password, database and optional 'driver' "
+                "('psycopg2' or 'mysql' or 'pymysql').\n"
+                f"Attempted SQL: {sql}"
+            )
+        def fetchone(self):
+            return None
+        def fetchall(self):
+            return []
+    class DummyConn:
+        def commit(self):
+            raise RuntimeError(
+                "No working DB connection available to commit. Provide DB credentials in st.secrets['db']."
+            )
+
+    cursor = DummyCursor()
+    conn = DummyConn()
+
 tables_reset = ['etudiants','professeurs','chefs_departement','administrateurs','vice_doyens']
 
 # ======================
@@ -590,9 +691,8 @@ elif st.session_state.step == "forgot_email":
     if st.button("Envoyer le code"):
         found = False
         for table in tables_reset:
-            result = supabase.table(table).select("*").eq("email", reset_email).execute()
-            users = result.data
-            if users:
+            cursor.execute(f"SELECT * FROM {table} WHERE email=%s", (reset_email,))
+            if cursor.fetchone():
                 found = True
                 st.session_state.reset_email = reset_email
                 st.session_state.reset_code = send_email_code(
@@ -662,10 +762,16 @@ elif st.session_state.step == "new_password":
         else:
             updated_any = False
             for table in tables_reset:
-                result = supabase.table(table).select("*").eq("email", st.session_state.reset_email).execute()
-                users = result.data
-                if users:
-                    supabase.table(table).update({"password": new_pass}).eq("email", st.session_state.reset_email).execute()
+                cursor.execute(
+                    f"SELECT * FROM {table} WHERE email=%s",
+                    (st.session_state.reset_email,)
+                )
+                if cursor.fetchone():
+                    cursor.execute(
+                        f"UPDATE {table} SET password=%s WHERE email=%s",
+                        (new_pass, st.session_state.reset_email)
+                    )
+                    conn.commit()
                     updated_any = True
 
             if updated_any:
@@ -676,7 +782,7 @@ elif st.session_state.step == "new_password":
                 st.error("Impossible de mettre à jour — email introuvable.")
 
 # ==================================================
-# DASHBOARDS ÉTENDUS
+# DASHBOARDS ÉTENDUS (modifications demandées)
 # ==================================================
 elif st.session_state.step == "dashboard":
 
@@ -685,59 +791,48 @@ elif st.session_state.step == "dashboard":
     user_data = None
 
     if role == "Etudiant":
-        result = supabase.table("etudiants")\
-            .select("*, formations(nom)")\
-            .eq("email", email)\
-            .execute()
-        users = result.data
-        if users:
-            user_data = users[0]
-            if 'formations' in user_data and user_data['formations']:
-                user_data['formation_nom'] = user_data['formations'][0]['nom']
-
+        cursor.execute("""
+            SELECT e.*, f.nom AS formation_nom 
+            FROM etudiants e 
+            LEFT JOIN formations f ON e.formation_id = f.id 
+            WHERE e.email = %s
+        """, (email,))
+        user_data = cursor.fetchone()
     elif role == "Professeur":
-        result = supabase.table("professeurs")\
-            .select("*, departements(nom)")\
-            .eq("email", email)\
-            .execute()
-        users = result.data
-        if users:
-            user_data = users[0]
-            if 'departements' in user_data and user_data['departements']:
-                user_data['dept_nom'] = user_data['departements'][0]['nom']
-
+        cursor.execute("""
+            SELECT p.*, d.nom AS dept_nom 
+            FROM professeurs p 
+            LEFT JOIN departements d ON p.dept_id = d.id 
+            WHERE p.email = %s
+        """, (email,))
+        user_data = cursor.fetchone()
     elif role == "Chef":
-        result = supabase.table("chefs_departement")\
-            .select("*, departements(nom)")\
-            .eq("email", email)\
-            .execute()
-        users = result.data
-        if users:
-            user_data = users[0]
-            if 'departements' in user_data and user_data['departements']:
-                user_data['dept_nom'] = user_data['departements'][0]['nom']
-
+        cursor.execute("""
+            SELECT c.*, d.nom AS dept_nom, c.dept_id
+            FROM chefs_departement c
+            LEFT JOIN departements d ON c.dept_id = d.id
+            WHERE c.email = %s
+        """, (email,))
+        user_data = cursor.fetchone()
     elif role in ("Vice-doyen", "Admin", "Administrateur examens"):
-        result = supabase.table("administrateurs").select("*").eq("email", email).execute()
-        users = result.data
-        if users:
-            user_data = users[0]
+        cursor.execute("SELECT * FROM administrateurs WHERE email = %s", (email,))
+        user_data = cursor.fetchone()
 
-    # --------------------
     # Sidebar
-    # --------------------
     with st.sidebar:
         st.title("📌 Menu")
         st.markdown("---")
         if user_data:
             st.subheader("👤 Mon Profil")
-            for key in ["nom","prenom","email"]:
-                if key in user_data:
-                    st.write(f"**{key.capitalize()} :** {user_data[key]}")
+            if 'nom' in user_data:
+                st.write(f"**Nom :** {user_data.get('nom','')}")
+            if 'prenom' in user_data:
+                st.write(f"**Prénom :** {user_data.get('prenom','')}")
             if role == "Etudiant" and 'formation_nom' in user_data:
                 st.write(f"**Formation :** {user_data.get('formation_nom')}")
             if role == "Professeur" and 'dept_nom' in user_data:
                 st.write(f"**Département :** {user_data.get('dept_nom')}")
+            st.write(f"**Email :** {user_data.get('email','')}")
 
         for _ in range(12): st.write("")
 
@@ -747,7 +842,7 @@ elif st.session_state.step == "dashboard":
             st.session_state.role = ""
             st.rerun()
 
-   # --------------------
+    # --------------------
     # Étudiant & Professeur UIs (inchangées)
     # --------------------
     if role == "Etudiant":
@@ -930,112 +1025,101 @@ elif st.session_state.step == "dashboard":
             except Exception as e:
                 st.info("aucun conflit détecté")
 
-# --------------------
-# Administrateur exams (service planification) : génération + optimisation + détection
-# --------------------
-elif role in ("Admin", "Administrateur examens"):
-    st.title("🛠️ Service Planification — Administrateur examens")
-    st.subheader("Génération & Optimisation des ressources")
-
-    # Sélection de période
-    col_d1, col_d2 = st.columns(2)
-    today = date.today()
-    default_start = today
-    default_end = today + timedelta(days=7)
-
-    with col_d1:
-        start_date = st.date_input("Date de début", value=default_start, key="admin_gen_start")
-    with col_d2:
-        end_date = st.date_input("Date de fin", value=default_end, key="admin_gen_end")
-
-    start_str = start_date.strftime("%Y-%m-%d") if isinstance(start_date, date) else None
-    end_str = end_date.strftime("%Y-%m-%d") if isinstance(end_date, date) else None
-
-    st.write("Actions disponibles :")
-    col_a1, col_a2 = st.columns(2)
-
-    # keys to hide from display (user requested)
-    excluded_keys = {'etudiants_1parjour', 'profs_3parjour', 'surveillances_par_prof', 'conflits_par_dept'}
-
     # --------------------
-    # Générer automatiquement
+    # Administrateur exams (service planification) : génération + optimisation + détection
     # --------------------
-    with col_a1:
-        if st.button("Générer automatiquement"):
+    elif role in ("Admin", "Administrateur examens"):
+        st.title("🛠️ Service Planification — Administrateur examens")
+        st.subheader("Génération & Optimisation des ressources")
+
+        # Sélection de période
+        col_d1, col_d2 = st.columns(2)
+        today = date.today()
+        default_start = today
+        default_end = today + timedelta(days=7)
+        with col_d1:
+            start_date = st.date_input("Date de début", value=default_start, key="admin_gen_start")
+        with col_d2:
+            end_date = st.date_input("Date de fin", value=default_end, key="admin_gen_end")
+
+        start_str = start_date.strftime("%Y-%m-%d") if isinstance(start_date, date) else None
+        end_str = end_date.strftime("%Y-%m-%d") if isinstance(end_date, date) else None
+
+        st.write("Actions disponibles :")
+        col_a1, col_a2 = st.columns(2)
+
+        # keys to hide from display (user requested)
+        excluded_keys = {'etudiants_1parjour', 'profs_3parjour', 'surveillances_par_prof', 'conflits_par_dept'}
+
+        with col_a1:
+            if st.button("Générer automatiquement"):
+                if start_str is None or end_str is None or start_str > end_str:
+                    st.error("Veuillez choisir une période valide (début ≤ fin).")
+                else:
+                    tic = time.time()
+                    report, conflicts = generate_timetable(cursor, conn, start_str, end_str, force=False)
+                    duration = time.time() - tic
+                    st.success(f"✅ Génération complète terminée en {duration:.1f} secondes !")
+                    # display only visible conflicts (exclude the 4 keys requested)
+                    visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
+                    total_visible = sum(len(v) for v in visible_conflicts.values())
+                    if total_visible == 0:
+                        st.info("Aucun conflit affiché pour cette analyse.")
+                    else:
+                        st.warning(f"{total_visible} conflit(s) affiché(s).")
+                        for k, rows in visible_conflicts.items():
+                            if rows:
+                                with st.expander(f"{k} — {len(rows)} élément(s)"):
+                                    show_table_safe(rows)
+
+        with col_a2:
+            if st.button("Optimiser les ressources"):
+                if start_str is None or end_str is None or start_str > end_str:
+                    st.error("Veuillez choisir une période valide (début ≤ fin).")
+                else:
+                    tic = time.time()
+                    report, conflicts = optimize_resources(cursor, conn, start_str, end_str)
+                    duration = time.time() - tic
+                    st.success(f"✅ Optimisation terminée en {report.get('duration_seconds', duration):.1f} secondes.")
+                    st.write("Améliorations estimées :")
+                    for k, v in report.get('improvements', {}).items():
+                        st.write(f"- {k.replace('_',' ')} : {v}")
+                    st.markdown("Notes :")
+
+                    # display only visible conflicts (exclude the 4 keys requested)
+                    visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
+                    total_visible = sum(len(v) for v in visible_conflicts.values())
+                    if total_visible == 0:
+                        st.info("Aucun conflit affiché après optimisation.")
+                    else:
+                        st.warning(f"{total_visible} conflit(s) affiché(s) après optimisation.")
+                        for k, rows in visible_conflicts.items():
+                            if rows:
+                                with st.expander(f"{k} — {len(rows)} élément(s)"):
+                                    show_table_safe(rows)
+
+        # Add a dedicated "Détecter conflits" action (does not change other UI)
+        if st.button("Détecter conflits"):
             if start_str is None or end_str is None or start_str > end_str:
                 st.error("Veuillez choisir une période valide (début ≤ fin).")
             else:
                 tic = time.time()
-                report, conflicts = generate_timetable(cursor, conn, start_str, end_str, force=False)
+                conflicts = detect_conflicts(cursor, start_str, end_str)
                 duration = time.time() - tic
-                st.success(f"✅ Génération complète terminée en {duration:.1f} secondes !")
-
-                # display only visible conflicts (exclude the 4 keys requested)
+                # Show only visible conflicts (exclude the 4 keys requested)
                 visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
                 total_visible = sum(len(v) for v in visible_conflicts.values())
                 if total_visible == 0:
-                    st.info("Aucun conflit affiché pour cette analyse.")
+                    st.success(f"✅ Analyse terminée en {duration:.1f} secondes — Aucun conflit affiché pour les catégories visibles.")
                 else:
-                    st.warning(f"{total_visible} conflit(s) affiché(s).")
+                    st.warning(f"⚠️ Analyse terminée en {duration:.1f} secondes — {total_visible} conflit(s) affiché(s).")
+                    st.markdown("**Résumé des conflits affichés**")
+                    for k, rows in visible_conflicts.items():
+                        st.write(f"- {k.replace('_',' ')} : {len(rows)}")
                     for k, rows in visible_conflicts.items():
                         if rows:
-                            with st.expander(f"{k} — {len(rows)} élément(s)"):
+                            with st.expander(f"Détails — {k}"):
                                 show_table_safe(rows)
-
-    # --------------------
-    # Optimiser les ressources
-    # --------------------
-    with col_a2:
-        if st.button("Optimiser les ressources"):
-            if start_str is None or end_str is None or start_str > end_str:
-                st.error("Veuillez choisir une période valide (début ≤ fin).")
-            else:
-                tic = time.time()
-                report, conflicts = optimize_resources(cursor, conn, start_str, end_str)
-                duration = time.time() - tic
-                st.success(f"✅ Optimisation terminée en {report.get('duration_seconds', duration):.1f} secondes.")
-
-                st.write("Améliorations estimées :")
-                for k, v in report.get('improvements', {}).items():
-                    st.write(f"- {k.replace('_',' ')} : {v}")
-                st.markdown("Notes :")
-
-                visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
-                total_visible = sum(len(v) for v in visible_conflicts.values())
-                if total_visible == 0:
-                    st.info("Aucun conflit affiché après optimisation.")
-                else:
-                    st.warning(f"{total_visible} conflit(s) affiché(s) après optimisation.")
-                    for k, rows in visible_conflicts.items():
-                        if rows:
-                            with st.expander(f"{k} — {len(rows)} élément(s)"):
-                                show_table_safe(rows)
-
-    # --------------------
-    # Détecter conflits
-    # --------------------
-    if st.button("Détecter conflits"):
-        if start_str is None or end_str is None or start_str > end_str:
-            st.error("Veuillez choisir une période valide (début ≤ fin).")
-        else:
-            tic = time.time()
-            conflicts = detect_conflicts(cursor, start_str, end_str)
-            duration = time.time() - tic
-
-            visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
-            total_visible = sum(len(v) for v in visible_conflicts.values())
-
-            if total_visible == 0:
-                st.success(f"✅ Analyse terminée en {duration:.1f} secondes — Aucun conflit affiché pour les catégories visibles.")
-            else:
-                st.warning(f"⚠️ Analyse terminée en {duration:.1f} secondes — {total_visible} conflit(s) affiché(s).")
-                st.markdown("**Résumé des conflits affichés**")
-                for k, rows in visible_conflicts.items():
-                    st.write(f"- {k.replace('_',' ')} : {len(rows)}")
-                for k, rows in visible_conflicts.items():
-                    if rows:
-                        with st.expander(f"Détails — {k}"):
-                            show_table_safe(rows)
 
     # --------------------
     # Vice-doyen / Doyen : Vue stratégique globale
