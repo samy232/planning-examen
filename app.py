@@ -734,12 +734,6 @@ elif st.session_state.step == "choose_role":
             st.session_state.step = "register_email"
             st.rerun()
 
-    with col3:
-        if st.button("Chef de département"):
-            st.session_state.register_role = "chefs_departement"
-            st.session_state.step = "register_email"
-            st.rerun()
-
     if st.button("Retour"):
         st.session_state.step = "login"
         st.rerun()
