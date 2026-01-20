@@ -295,44 +295,54 @@ if st.session_state.step == "login":
 
     col1, col2, col3 = st.columns(3)
 
+    # ======================
+    # LOGIN BUTTON
+    # ======================
     with col1:
-if st.button("Se connecter"):
-    roles_tables = {
-        "Etudiant": "etudiants",
-        "Professeur": "professeurs",
-        "Chef": "chefs_departement",
-        "Admin": "administrateurs",
-        "Vice-doyen": "vice_doyens",
-        "Administrateur examens": "administrateurs"
-    }
+        if st.button("Se connecter"):
+            roles_tables = {
+                "Etudiant": "etudiants",
+                "Professeur": "professeurs",
+                "Chef": "chefs_departement",
+                "Admin": "administrateurs",
+                "Vice-doyen": "vice_doyens",
+                "Administrateur examens": "administrateurs"
+            }
 
-    found_user = False
-    for r, table in roles_tables.items():
-        result = supabase.table(table)\
-            .select("*")\
-            .eq("email", email)\
-            .eq("password", password)\
-            .execute()
-        users = result.data
+            found_user = False
+            for role_name, table_name in roles_tables.items():
+                result = supabase.table(table_name)\
+                    .select("*")\
+                    .eq("email", email)\
+                    .eq("password", password)\
+                    .execute()
+                
+                users = result.data  # this is a list of dicts
+                
+                if users:  # user found
+                    st.session_state.user_email = email
+                    st.session_state.role = role_name
+                    st.session_state.step = "dashboard"
+                    found_user = True
+                    break
 
-        if users:  # non-empty list = user found
-            st.session_state.user_email = email
-            st.session_state.role = r
-            st.session_state.step = "dashboard"
-            found_user = True
-            break
+            if found_user:
+                st.success(f"Connecté en tant que {st.session_state.role}")
+                st.rerun()
+            else:
+                st.error("Email ou mot de passe incorrect")
 
-    if found_user:
-        st.rerun()
-    else:
-        st.error("Email ou mot de passe incorrect")
-
-
+    # ======================
+    # FORGOT PASSWORD
+    # ======================
     with col2:
         if st.button("Mot de passe oublié ?"):
             st.session_state.step = "forgot_email"
             st.rerun()
 
+    # ======================
+    # NEW REGISTRATION
+    # ======================
     with col3:
         if st.button("Nouvelle inscription"):
             st.session_state.step = "choose_role"
