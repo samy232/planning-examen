@@ -598,59 +598,89 @@ for key, value in defaults.items():
 # PAGE 1 — LOGIN + INSCRIPTION
 # ==================================================
 # ==================================================
-# PAGE 1 — LOGIN + INSCRIPTION (VERSION DESIGN)
+# PAGE 1 — LOGIN + INSCRIPTION (VERSION PREMIUM)
 # ==================================================
 if st.session_state.step == "login":
-    
-    # CSS pour styliser le cadre et les boutons comme dans CustomTkinter
+
+    # --- CSS CUSTOM POUR LOOK MODERNE ---
     st.markdown("""
         <style>
-        .login-box {
-            background-color: #D9D9D9;
-            padding: 40px;
-            border-radius: 20px;
-            border: 1px solid #ccc;
+        /* Fond d'écran global */
+        .stApp {
+            background: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), 
+                        url("https://images.unsplash.com/photo-1501504905252-473c47e087f8?q=80&w=1974&auto=format&fit=crop");
+            background-size: cover;
         }
-        .stButton>button {
+
+        /* Conteneur de login */
+        .login-container {
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 3rem;
+            border-radius: 25px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            text-align: center;
+        }
+
+        /* Champs de texte */
+        .stTextInput input {
+            border-radius: 12px !important;
+            border: 1px solid #ddd !important;
+            padding: 10px !important;
+        }
+
+        /* Bouton Login */
+        div.stButton > button:first-child {
             background-color: #0085FF !important;
             color: white !important;
-            border-radius: 15px !important;
-            height: 45px !important;
-            width: 100% !important;
-            font-weight: bold !important;
+            width: 100%;
+            border-radius: 12px;
+            height: 50px;
+            font-size: 18px;
+            font-weight: bold;
+            border: none;
+            transition: 0.3s;
+        }
+        
+        div.stButton > button:first-child:hover {
+            background-color: #0066CC !important;
+            transform: translateY(-2px);
+        }
+
+        /* Liens secondaires */
+        .footer-links {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 20px;
+            font-size: 14px;
+        }
+        
+        .footer-links a {
+            color: #0085FF;
+            text-decoration: none;
         }
         </style>
     """, unsafe_allow_html=True)
 
-    # Mise en page : Image à gauche (bg1.jpg), Formulaire à droite
-    col_img, col_form = st.columns([1, 1], gap="large")
+    # --- LAYOUT CENTRALISÉ ---
+    empty_l, col_main, empty_r = st.columns([1, 2, 1])
 
-    with col_img:
-        # On essaie d'afficher l'image de fond si elle existe
-        try:
-            st.image("bg1.jpg", use_container_width=True)
-        except:
-            # Si l'image n'est pas là, on met un espace vide stylé
-            st.markdown("<div style='height: 400px; background: linear-gradient(135deg, #0085FF 0%, #003366 100%); border-radius:20px;'></div>", unsafe_allow_html=True)
-
-    with col_form:
-        st.markdown('<div class="login-box">', unsafe_allow_html=True)
-        st.markdown("### Welcome Back! \n **Login to Account**")
+    with col_main:
+        st.markdown('<div class="login-container">', unsafe_allow_html=True)
         
-        email = st.text_input("Email", placeholder="Username", label_visibility="collapsed")
-        password = st.text_input("Mot de passe", type="password", placeholder="Password", label_visibility="collapsed")
-        
-        st.write("") # Espace
+        st.markdown("<h1 style='color: #1E1E1E; margin-bottom: 0;'>Welcome Back!</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #666; margin-bottom: 2rem;'>Connectez-vous à votre espace EDT</p>", unsafe_allow_html=True)
 
-        # LOGIN LOGIC
-        if st.button("Login"):
+        # Formulaire
+        email = st.text_input("Email", placeholder="votre@email.com", label_visibility="collapsed")
+        password = st.text_input("Mot de passe", type="password", placeholder="Mot de passe", label_visibility="collapsed")
+        
+        st.write("") # Espacement
+
+        if st.button("Se connecter"):
             roles_tables = {
-                "Etudiant": "etudiants",
-                "Professeur": "professeurs",
-                "Chef": "chefs_departement",
-                "Admin": "administrateurs",
-                "Vice-doyen": "vice_doyens",
-                "Administrateur examens": "administrateurs"
+                "Etudiant": "etudiants", "Professeur": "professeurs",
+                "Chef": "chefs_departement", "Admin": "administrateurs",
+                "Vice-doyen": "vice_doyens", "Administrateur examens": "administrateurs"
             }
 
             found_user = False
@@ -664,12 +694,22 @@ if st.session_state.step == "login":
                     break
 
             if found_user:
-                st.success(f"Connecté !")
+                st.success("Accès autorisé...")
                 st.rerun()
             else:
-                st.error("Email ou mot de passe incorrect")
+                st.error("Identifiants invalides")
+
+        # --- LIENS INSCRIPTION & MOT DE PASSE OUBLIÉ ---
+        col_link1, col_link2 = st.columns(2)
+        with col_link1:
+            if st.button("📝 Créer un compte", key="btn_signup", help="S'inscrire"):
+                # Ici tu peux changer st.session_state.step = "signup" si tu as une page dédiée
+                st.info("Redirection vers l'inscription...")
         
-        st.markdown("<p style='text-align: center; color: black; cursor: pointer;'>Create Account!</p>", unsafe_allow_html=True)
+        with col_link2:
+            if st.button("🔑 Mot de passe oublié ?", key="btn_forgot"):
+                st.warning("Contactez l'administrateur pour réinitialiser.")
+
         st.markdown('</div>', unsafe_allow_html=True)
 # ==================================================
 # PAGE 2 — CHOIX DU RÔLE
