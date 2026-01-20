@@ -665,7 +665,7 @@ if st.session_state.step == "login":
             st.write("<div style='height:20px'></div>", unsafe_allow_html=True)
 
             # ====== CENTERED BUTTON COLUMN ======
-            c1, c2, c3 = st.columns([1, 2, 1])
+            c1, c2, c3 = st.columns([1, 1, 1])
             with c2:
 
                 # -------- BOUTON PRINCIPAL --------
