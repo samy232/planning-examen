@@ -113,12 +113,6 @@ if cursor is None:
             params = args[1] if len(args) > 1 else kwargs.get('params', None)
             self._last_query = sql
             self._last_params = params
-            # Inform developer/user in the Streamlit app (non-blocking)
-            try:
-                st.warning(f"[DB fallback] Query skipped (no DB configured): {sql} — params: {params}")
-            except Exception:
-                # If Streamlit isn't available in this context for some reason, ignore
-                pass
             # Provide empty buffer so fetchone/fetchall behave sanely (no exceptions)
             self._buffer = []
 
@@ -132,11 +126,8 @@ if cursor is None:
 
     class DummyConn:
         def commit(self):
-            # no-op when there's no real DB; warn user
-            try:
-                st.warning("Commit called but no DB configured; changes not persisted.")
-            except Exception:
-                pass
+            # no-op when there's no real DB; changes are not persisted.
+            pass
 
     cursor = DummyCursor()
     conn = DummyConn()
@@ -1191,7 +1182,7 @@ elif st.session_state.step == "dashboard":
                     if cols[3].button(f"Valider final {ex['id']}", key=f"final_val_{ex['id']}"):
                         cursor.execute("UPDATE examens SET final_validated=1 WHERE id=%s", (ex['id'],))
                         conn.commit()
-                        st.success(f"Examen {ex['id']} valid�� définitivement.")
+                        st.success(f"Examen {ex['id']} validé définitivement.")
                         st.experimental_rerun()
             else:
                 st.info("Aucun examen en attente de validation finale.")
