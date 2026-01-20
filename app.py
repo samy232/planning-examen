@@ -636,12 +636,15 @@ if st.session_state.step == "login":
             color: white !important;
         }
 
+        /* ALL BUTTONS SAME STYLE */
         div.stButton > button {
-            width: 400px !important;   /* MEME LARGEUR POUR TOUS */
+            width: 400px !important;        /* same width for all */
             border-radius: 10px !important;
-            height: 50px !important;   /* MEME HAUTEUR POUR TOUS */
+            height: 50px !important;        /* same height for all */
             font-weight: bold !important;
-             margin-left: 50% !important;   /* <-- MOVE LEFT */
+            margin-left: auto !important;
+            margin-right: auto !important;  /* centered in container */
+            display: block !important;
         }
 
         div.stButton > button[kind="primary"] {
@@ -652,6 +655,7 @@ if st.session_state.step == "login":
         </style>
     """, unsafe_allow_html=True)
 
+    # --- PAGE LAYOUT ---
     empty_l, col_center, empty_r = st.columns([1, 2, 1])
 
     with col_center:
@@ -664,56 +668,51 @@ if st.session_state.step == "login":
 
             st.write("<div style='height:20px'></div>", unsafe_allow_html=True)
 
-            # ====== CENTERED BUTTON COLUMN ======
-            c1, c2, c3 = st.columns([1, 1, 1])
-            with c2:
+            # -------- BOUTON PRINCIPAL --------
+            if st.button("Se connecter", type="primary"):
+                roles_tables = {
+                    "Etudiant": "etudiants",
+                    "Professeur": "professeurs",
+                    "Chef": "chefs_departement",
+                    "Admin": "administrateurs",
+                    "Vice-doyen": "vice_doyens",
+                    "Administrateur examens": "administrateurs"
+                }
 
-                # -------- BOUTON PRINCIPAL --------
-                if st.button("Se connecter", type="primary"):
-                    roles_tables = {
-                        "Etudiant": "etudiants",
-                        "Professeur": "professeurs",
-                        "Chef": "chefs_departement",
-                        "Admin": "administrateurs",
-                        "Vice-doyen": "vice_doyens",
-                        "Administrateur examens": "administrateurs"
-                    }
+                found_user = False
+                for role_name, table_name in roles_tables.items():
+                    users = db_select(
+                        table_name,
+                        "*",
+                        eq={"email": email, "password": password}
+                    )
+                    if users:
+                        st.session_state.user_email = email
+                        st.session_state.role = role_name
+                        st.session_state.step = "dashboard"
+                        found_user = True
+                        break
 
-                    found_user = False
-                    for role_name, table_name in roles_tables.items():
-                        users = db_select(
-                            table_name,
-                            "*",
-                            eq={"email": email, "password": password}
-                        )
-                        if users:
-                            st.session_state.user_email = email
-                            st.session_state.role = role_name
-                            st.session_state.step = "dashboard"
-                            found_user = True
-                            break
-
-                    if found_user:
-                        st.success(f"Connecté en tant que {st.session_state.role}")
-                        st.rerun()
-                    else:
-                        st.error("Identifiants incorrects")
-
-                # -------- LIGNE BLANCHE --------
-                st.markdown("<hr style='border:1px solid white;'>", unsafe_allow_html=True)
-
-                # -------- BOUTONS SECONDAIRES --------
-                if st.button("Mot de passe oublié ?", key="forgot"):
-                    st.session_state.step = "forgot_email"
+                if found_user:
+                    st.success(f"Connecté en tant que {st.session_state.role}")
                     st.rerun()
+                else:
+                    st.error("Identifiants incorrects")
 
-                st.write("")  # petit espace
+            # -------- LIGNE BLANCHE --------
+            st.markdown("<hr style='border:1px solid white;'>", unsafe_allow_html=True)
 
-                if st.button("Nouvelle inscription", key="signup"):
-                    st.session_state.step = "choose_role"
-                    st.rerun()
+            # -------- BOUTONS SECONDAIRES (SAME LEVEL) --------
+            if st.button("Mot de passe oublié ?", key="forgot"):
+                st.session_state.step = "forgot_email"
+                st.rerun()
 
-                
+            st.write("")  # petit espace
+
+            if st.button("Nouvelle inscription", key="signup"):
+                st.session_state.step = "choose_role"
+                st.rerun()
+     
 # ==================================================
 # PAGE 2 — CHOIX DU RÔLE
 # ==================================================
