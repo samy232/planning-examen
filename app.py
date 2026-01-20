@@ -609,115 +609,84 @@ def db_select(table, columns, eq=None):
 
 
 # ==================================================
-# PAGE 1 — LOGIN + INSCRIPTION (DESIGN & BACKEND FIX)
+# PAGE 1 — LOGIN + INSCRIPTION
 # ==================================================
 if st.session_state.step == "login":
 
-    # --- CSS : DESIGN NOIR & BLEU GRADIENT ---
+    # --- LE DESIGN (CSS UNIQUEMENT) ---
     st.markdown("""
         <style>
         .stApp { background-color: #000000 !important; }
-
-        /* Le Panneau Bleu Unique */
         [data-testid="stVerticalBlock"] > div:has(div.blue-panel) {
             background: linear-gradient(135deg, #1E3A8A 0%, #111827 100%) !important;
-            padding: 45px !important;
-            border-radius: 25px !important;
+            padding: 40px !important;
+            border-radius: 20px !important;
             box-shadow: 0px 10px 40px rgba(0, 133, 255, 0.4) !important;
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
         }
-
-        .login-title {
-            color: white;
-            text-align: center;
-            font-size: 32px;
-            font-weight: bold;
-            margin-bottom: 25px;
-        }
-
-        .stTextInput input {
-            background-color: rgba(255, 255, 255, 0.1) !important;
-            color: white !important;
-            border: 1px solid rgba(255, 255, 255, 0.2) !important;
-            border-radius: 10px !important;
-        }
         .stTextInput label { color: white !important; }
-
-        /* Bouton Login principal */
-        div.stButton > button:first-child {
-            background-color: #0085FF !important;
-            color: white !important;
-            border-radius: 10px;
-            height: 48px;
-            width: 100%;
-            font-weight: bold;
-            border: none;
-            margin-top: 10px;
-        }
+        .stTitle { color: white !important; }
         </style>
     """, unsafe_allow_html=True)
 
-    # --- STRUCTURE VISUELLE ---
-    _, col_center, _ = st.columns([0.6, 1, 0.6])
-
-    with col_center:
-        st.write("#") 
+    # On utilise un container pour appliquer le design sans changer ton code
+    with st.container():
+        st.markdown('<div class="blue-panel"></div>', unsafe_allow_html=True)
         
-        with st.container():
-            # Marqueur pour le CSS
-            st.markdown('<div class="blue-panel"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="login-title">Connexion</div>', unsafe_allow_html=True)
+        # --- TON CODE EXACTEMENT COMME ENVOYÉ ---
+        st.title("📚 Connexion - Plateforme EDT")
 
-            # Utilisation de clés uniques pour éviter les conflits de session
-            input_email = st.text_input("Email", placeholder="votre@email.com", key="login_email_input").strip()
-            input_password = st.text_input("Mot de passe", type="password", placeholder="••••••••", key="login_pw_input")
-            
-            # --- BACKEND : LOGIQUE DE CONNEXION ---
-            if st.button("Se connecter", key="btn_login_main"):
-                if input_email and input_password:
-                    roles_tables = {
-                        "Etudiant": "etudiants",
-                        "Professeur": "professeurs",
-                        "Chef": "chefs_departement",
-                        "Admin": "administrateurs",
-                        "Vice-doyen": "vice_doyens",
-                        "Administrateur examens": "administrateurs"
-                    }
+        email = st.text_input("Email")
+        password = st.text_input("Mot de passe", type="password")
 
-                    found_user = False
-                    with st.spinner("Vérification..."):
-                        for role_name, table_name in roles_tables.items():
-                            # Appel direct à ta fonction db_select
-                            users = db_select(table_name, "*", eq={"email": input_email, "password": input_password})
-                            
-                            if users and len(users) > 0:
-                                st.session_state.user_email = input_email
-                                st.session_state.role = role_name
-                                st.session_state.step = "dashboard"
-                                found_user = True
-                                break
+        col1, col2, col3 = st.columns(3)
 
-                    if found_user:
-                        st.success(f"Bienvenue {st.session_state.role} !")
-                        time.sleep(0.5)
-                        st.rerun()
-                    else:
-                        st.error("Email ou mot de passe incorrect")
+        # ======================
+        # LOGIN BUTTON
+        # ======================
+        with col1:
+            if st.button("Se connecter"):
+                roles_tables = {
+                    "Etudiant": "etudiants",
+                    "Professeur": "professeurs",
+                    "Chef": "chefs_departement",
+                    "Admin": "administrateurs",
+                    "Vice-doyen": "vice_doyens",
+                    "Administrateur examens": "administrateurs"
+                }
+
+                found_user = False
+                for role_name, table_name in roles_tables.items():
+                    # Use Supabase for authentication lookup
+                    users = db_select(table_name, "*", eq={"email": email, "password": password})
+                    if users:
+                        st.session_state.user_email = email
+                        st.session_state.role = role_name
+                        st.session_state.step = "dashboard"
+                        found_user = True
+                        break
+
+                if found_user:
+                    st.success(f"Connecté en tant que {st.session_state.role}")
+                    st.rerun()
                 else:
-                    st.warning("Veuillez remplir tous les champs")
+                    st.error("Email ou mot de passe incorrect")
 
-            # --- NAVIGATION BAS DE PANNEAU ---
-            st.markdown("<hr style='opacity:0.2; margin: 20px 0;'>", unsafe_allow_html=True)
-            
-            col_forgot, col_new = st.columns(2)
-            with col_forgot:
-                if st.button("Mot de passe oublié ?", key="btn_forgot"):
-                    st.session_state.step = "forgot_email"
-                    st.rerun()
-            with col_new:
-                if st.button("Nouvelle inscription", key="btn_new_reg"):
-                    st.session_state.step = "choose_role"
-                    st.rerun()
+        # ======================
+        # FORGOT PASSWORD
+        # ======================
+        with col2:
+            if st.button("Mot de passe oublié ?"):
+                st.session_state.step = "forgot_email"
+                st.rerun()
+
+        # ======================
+        # NEW REGISTRATION
+        # ======================
+        with col3:
+            if st.button("Nouvelle inscription"):
+                st.session_state.step = "choose_role"
+                st.rerun()
 # ==================================================
 # PAGE 2 — CHOIX DU RÔLE
 # ==================================================
