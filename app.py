@@ -6,32 +6,19 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, date
 import time
-import psycopg2
-from psycopg2.extras import RealDictCursor
+from supabase import create_client, Client
 
 # ======================
 # CONFIG STREAMLIT
 # ======================
 st.set_page_config(page_title="Connexion EDT", layout="wide", initial_sidebar_state="collapsed")
 
-
-# Supabase credentials
-DB_HOST = "ahxbpiyfrgquiyqcnpnq.supabase.co"
-DB_PORT = 5432
-DB_NAME = "postgres"
-DB_USER = "postgres"
-DB_PASSWORD = "RvXFOvvv1YZ6E257"
-
-# Connexion à la base
-conn = psycopg2.connect(
-    host=DB_HOST,
-    port=DB_PORT,
-    dbname=DB_NAME,
-    user=DB_USER,
-    password=DB_PASSWORD,
-    sslmode="require"
-)
-cursor = conn.cursor(cursor_factory=RealDictCursor)
+# ======================
+# SUPABASE CLIENT
+# ======================
+SUPABASE_URL = st.secrets["supabase"]["url"]
+SUPABASE_KEY = st.secrets["supabase"]["key"]
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 tables_reset = ['etudiants','professeurs','chefs_departement','administrateurs','vice_doyens']
 
