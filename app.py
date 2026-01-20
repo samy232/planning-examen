@@ -598,7 +598,7 @@ for key, value in defaults.items():
 
 
 # ==================================================
-# PAGE 1 — LOGIN + INSCRIPTION
+# PAGE 1 — LOGIN + INSCRIPTION (DESIGN & BACKEND)
 # ==================================================
 if st.session_state.step == "login":
 
@@ -641,7 +641,7 @@ if st.session_state.step == "login":
             color: white !important;
         }
 
-        /* Bouton Login */
+        /* Bouton Login principal */
         div.stButton > button:first-child {
             background-color: #0085FF !important;
             color: white !important;
@@ -650,12 +650,6 @@ if st.session_state.step == "login":
             height: 48px;
             width: 100%;
             font-weight: bold;
-            margin-top: 15px;
-        }
-
-        /* Liens secondaires */
-        .secondary-links {
-            text-align: center;
             margin-top: 15px;
         }
         </style>
@@ -668,6 +662,7 @@ if st.session_state.step == "login":
         st.write("#") 
         
         with st.container():
+            # Marqueur pour le CSS
             st.markdown('<div class="blue-panel"></div>', unsafe_allow_html=True)
             st.markdown('<div class="login-title">Connexion</div>', unsafe_allow_html=True)
 
