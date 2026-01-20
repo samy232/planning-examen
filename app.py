@@ -625,7 +625,7 @@ if st.session_state.step == "login":
             text-align: center;
             font-size: 32px;
             font-weight: bold;
-            margin-top: -110px; /* Remonte le texte à l'intérieur du panneau */
+            margin-top: -100px; /* Remonte le texte à l'intérieur du panneau */
         }
 
         /* Styliser les inputs */
