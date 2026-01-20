@@ -25,6 +25,18 @@ SUPABASE_URL = st.secrets["supabase"]["url"]
 SUPABASE_KEY = st.secrets["supabase"]["key"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# Optional admin client (service_role key) for writes. Put your service_role key in secrets as:
+# [supabase]
+# service_role = "your_service_role_key_here"
+SERVICE_ROLE_KEY = st.secrets["supabase"].get("service_role") or st.secrets["supabase"].get("service_role_key")
+supabase_admin: Optional[Client] = None
+if SERVICE_ROLE_KEY:
+    try:
+        supabase_admin = create_client(SUPABASE_URL, SERVICE_ROLE_KEY)
+        print("[supabase_admin] service_role client created")
+    except Exception as e:
+        print("[supabase_admin] cannot create admin client:", e)
+
 # We removed cursor/conn mechanism — everything uses Supabase now.
 is_real_db = False  # kept for code paths that previously checked this flag
 
@@ -43,7 +55,6 @@ def db_select(table: str, select: str = "*", eq: Dict[str, Any] = None, order: O
                 q = q.eq(k, v)
         if order:
             # order example: "column.asc" or "column.desc"
-            # supabase-py uses .order(column, ascending=True/False)
             parts = order.split(".")
             col = parts[0]
             asc = True
@@ -52,8 +63,8 @@ def db_select(table: str, select: str = "*", eq: Dict[str, Any] = None, order: O
             q = q.order(col, ascending=asc)
         if limit:
             q = q.limit(limit)
-        if offset:
-            q = q.range(offset, offset + (limit - 1) if limit else None)
+        if offset and limit:
+            q = q.range(offset, offset + (limit - 1))
         res = q.execute()
         return res.data or []
     except Exception as e:
@@ -65,14 +76,22 @@ def db_get_one(table: str, select: str = "*", eq: Dict[str, Any] = None) -> Opti
     rows = db_select(table, select=select, eq=eq, limit=1)
     return rows[0] if rows else None
 
+# --- REPLACED db_insert: uses admin client if available ---
 def db_insert(table: str, payload: Any) -> Dict[str, Any]:
-    """Insert payload (dict or list) into table. Returns response dict."""
+    """Insert payload (dict or list) into table. Uses admin client if available for writes.
+    Returns dict {data, error, inserted_count}.
+    """
     try:
-        res = supabase.table(table).insert(payload).execute()
-        return {"data": res.data, "error": res.error}
+        client = supabase_admin if supabase_admin is not None else supabase
+        res = client.table(table).insert(payload).execute()
+        err = getattr(res, "error", None)
+        data = getattr(res, "data", None)
+        inserted = len(data) if isinstance(data, list) else (1 if data else 0)
+        return {"data": data, "error": err, "inserted_count": inserted}
     except Exception as e:
-        print(f"[db_insert] error table={table} payload={payload} : {e}")
-        return {"data": None, "error": str(e)}
+        print(f"[db_insert] error table={table} payload_size={len(payload) if isinstance(payload, list) else 1} : {e}")
+        return {"data": None, "error": str(e), "inserted_count": 0}
+# --- end replaced db_insert ---
 
 def db_update(table: str, values: Dict[str, Any], eq: Dict[str, Any]) -> Dict[str, Any]:
     """Update table set values where eq filters apply."""
@@ -138,11 +157,10 @@ def _parse_datetime(val):
     if val is None:
         return None
     if isinstance(val, str):
-        # Supabase returns ISO strings for timestamps
+        # Supabase may return ISO strings for timestamps
         try:
             return datetime.fromisoformat(val)
         except Exception:
-            # attempt common formats
             try:
                 return datetime.strptime(val, "%Y-%m-%d %H:%M:%S")
             except Exception:
@@ -170,7 +188,7 @@ def detect_conflicts(start_date=None, end_date=None):
     }
 
     # fetch tables
-    exams = db_select("examens", "*")  # uses supabase table name 'examens'
+    exams = db_select("examens", "*")
     modules = {m['id']: m for m in db_select("modules", "id,nom,formation_id")}
     inscriptions = db_select("inscriptions", "etudiant_id,module_id")
     students = {s['id']: s for s in db_select("etudiants", "id,nom,prenom,email,formation_id")}
@@ -188,9 +206,7 @@ def detect_conflicts(start_date=None, end_date=None):
         exams_by_id[eid] = e_parsed
 
     # 1) Students >1 exam per day
-    # Build student -> list of exam dates
     stud_exams_by_day = defaultdict(lambda: defaultdict(list))  # student_id -> date -> [exam_ids]
-    # build mapping module_id -> exam_ids (there may be multiple)
     module_to_exams = defaultdict(list)
     for e in exams:
         mid = e.get('module_id')
@@ -227,7 +243,6 @@ def detect_conflicts(start_date=None, end_date=None):
                 conflicts['profs_3parjour'].append({'prof_id': pid, 'jour': str(day), 'nb_exams': cnt})
 
     # 3) Room capacity: count unique students per exam (via inscriptions on module)
-    # For each exam, count inscriptions where module_id = exam.module_id
     module_ins_counts = defaultdict(int)
     for ins in inscriptions:
         module_ins_counts[ins['module_id']] += 1
@@ -258,7 +273,6 @@ def detect_conflicts(start_date=None, end_date=None):
     conflicts['surveillances_par_prof'] = surveillances
 
     # 5) Conflicts per department: overlap same day and overlapping time & same room or same prof
-    # For each pair of exams on same day check overlap
     dept_conflict_counts = defaultdict(int)
     exam_list = list(exams_by_id.values())
     for i in range(len(exam_list)):
@@ -277,14 +291,12 @@ def detect_conflicts(start_date=None, end_date=None):
             if dt1.date() != dt2.date():
                 continue
             end2 = dt2 + timedelta(minutes=dur2)
-            # overlap?
             overlap = not (end1 <= dt2 or end2 <= dt1)
             if not overlap:
                 continue
             same_room = (e1.get('salle_id') is not None and e1.get('salle_id') == e2.get('salle_id'))
             same_prof = (e1.get('prof_id') is not None and e1.get('prof_id') == e2.get('prof_id'))
             if same_room or same_prof:
-                # attribute to department of the professor of e1 if exists
                 prof_id = e1.get('prof_id')
                 if prof_id and profs.get(prof_id):
                     dept_id = profs[prof_id].get('dept_id')
@@ -310,7 +322,6 @@ def compute_kpis(start_date=None, end_date=None):
         nb_seances = sum(1 for e in exams if (e.get('date_heure') and s_date <= _parse_datetime(e.get('date_heure')) < e_date))
         periode_days = (e_date.date() - s_date.date()).days
     else:
-        # last 30 days
         cutoff = datetime.now() - timedelta(days=30)
         nb_seances = sum(1 for e in exams if (e.get('date_heure') and _parse_datetime(e.get('date_heure')) >= cutoff))
         periode_days = 30
@@ -327,12 +338,11 @@ def compute_kpis(start_date=None, end_date=None):
         pid = e.get('prof_id')
         dur = int(e.get('duree_minutes') or 0)
         dt = _parse_datetime(e.get('date_heure'))
-        if pid and dur:
+        if pid and dur and dt:
             if start_date and end_date:
                 if not (start_date <= dt.strftime("%Y-%m-%d") <= end_date):
                     continue
             else:
-                # last 30 days
                 if dt < datetime.now() - timedelta(days=30):
                     continue
             prof_minutes[pid] += dur
@@ -356,7 +366,7 @@ def compute_kpis(start_date=None, end_date=None):
     return kpis
 
 # ======================
-# TIMETABLE GENERATION (greedy prototype) using Supabase
+# TIMETABLE GENERATION (OPTIMIZED) using Supabase
 # ======================
 def _get_dates_between(start_str, end_str):
     s = datetime.strptime(start_str, "%Y-%m-%d").date()
@@ -370,10 +380,10 @@ def _get_dates_between(start_str, end_str):
 
 def generate_timetable(start_date=None, end_date=None, force=False):
     """
-    Supabase-only greedy timetable generator.
-    - Reads modules, inscriptions, rooms, profs from Supabase.
-    - Tries to assign each module to a day/room/prof respecting constraints.
-    - If force=True, persists generated examens into Supabase.
+    Optimized Supabase-only greedy timetable generator.
+    - Prefetches modules, inscriptions, salles, profs, formations, existing exams.
+    - Performs scheduling in memory with minimal Python overhead.
+    - Persists with a single bulk insert (via db_insert).
     """
     tic = time.time()
     report = {"message": "Génération automatique exécutée.", "created_slots": 0, "attempts": 0}
@@ -382,114 +392,113 @@ def generate_timetable(start_date=None, end_date=None, force=False):
     if not start_date or not end_date:
         return {"error": "start_date & end_date required"}, {}
 
+    # build date list
     try:
         days = _get_dates_between(start_date, end_date)
     except Exception as e:
         return {"error": f"Invalid dates: {e}"}, {}
 
-    # fetch data
-    modules = db_select("modules", "id,nom,formation_id")  # list
-    modules_count = {}
-    # count inscriptions per module
+    # 1) Prefetch everything once
+    modules = db_select("modules", "id,nom,formation_id")           # list
     inscriptions = db_select("inscriptions", "etudiant_id,module_id")
-    for ins in inscriptions:
-        mid = ins.get('module_id')
-        modules_count[mid] = modules_count.get(mid, 0) + 1
     rooms = db_select("lieu_examen", "id,nom,capacite")
     profs = db_select("professeurs", "id,nom,dept_id")
     formations = {f['id']: f for f in db_select("formations", "id,nom,dept_id")}
+    # existing examens used to detect prior assignments/durations
+    existing_exams = db_select("examens", "id,module_id,prof_id,duree_minutes,date_heure,salle_id")
 
-    profs_by_dept = defaultdict(list)
-    for p in profs:
-        profs_by_dept[p.get('dept_id')].append(p)
-
-    # trackers
-    scheduled = []
-    student_exam_days = defaultdict(set)  # student_id -> set(dates)
-    prof_exam_count_by_day = defaultdict(lambda: defaultdict(int))  # prof_id -> {date:count}
-    room_used_by_slot = defaultdict(set)  # date -> set(room_id)
-
-    # helper functions
+    # build fast lookup maps
     module_to_students = defaultdict(list)
     for ins in inscriptions:
         module_to_students[ins['module_id']].append(ins['etudiant_id'])
 
-    def students_free_on_date(module_id, day):
-        studs = module_to_students.get(module_id, [])
-        for s in studs:
-            if day in student_exam_days.get(s, set()):
-                return False
-        return True
+    module_ins_count = {mid: len(studs) for mid, studs in module_to_students.items()}
 
-    def choose_prof_for_module(module_id, formation_id):
-        # Try to reuse a prof who was previously assigned to that module (examens table)
-        existing = db_select("examens", "prof_id,module_id", eq={"module_id": module_id}, limit=1)
-        if existing:
-            pid = existing[0].get('prof_id')
-            if pid:
-                return pid
-        # else pick professor from same department if possible
-        dept_id = None
-        if formation_id:
-            f = formations.get(formation_id)
-            if f:
-                dept_id = f.get('dept_id')
-        if dept_id and profs_by_dept.get(dept_id):
-            cand = min(profs_by_dept[dept_id], key=lambda p: sum(prof_exam_count_by_day[p['id']].values()))
-            return cand['id']
-        if profs:
-            cand = min(profs, key=lambda p: sum(prof_exam_count_by_day[p['id']].values()))
-            return cand['id']
-        return None
+    rooms_by_capacity = sorted([{ 'id': r['id'], 'capacite': int(r.get('capacite') or 0) } for r in rooms],
+                                key=lambda x: x['capacite'])
 
-    # sort modules by descending nb students
-    modules_sorted = sorted(modules, key=lambda m: -(modules_count.get(m['id'], 0)))
+    profs_by_id = {p['id']: p for p in profs}
+    profs_by_dept = defaultdict(list)
+    for p in profs:
+        profs_by_dept[p.get('dept_id')].append(p)
+
+    module_default_prof = {}
+    module_default_duration = {}
+    for e in existing_exams:
+        mid = e.get('module_id')
+        if mid and e.get('prof_id'):
+            module_default_prof.setdefault(mid, e.get('prof_id'))
+        if mid and e.get('duree_minutes'):
+            try:
+                module_default_duration.setdefault(mid, int(e.get('duree_minutes')))
+            except Exception:
+                pass
+
+    # trackers (use lightweight builtins)
+    scheduled = []
+    student_busy_days = defaultdict(set)            # student_id -> set(date)
+    prof_count_day = defaultdict(lambda: defaultdict(int))  # prof_id -> {date:count}
+    room_used_day = defaultdict(set)                # date -> set(room_id)
+
+    # sort modules by descending number of students (largest scheduled first)
+    modules_sorted = sorted(modules, key=lambda m: -module_ins_count.get(m['id'], 0))
 
     for mod in modules_sorted:
         mid = mod.get('id')
         mname = mod.get('nom')
-        nb_ins = modules_count.get(mid, 0)
+        nb_ins = module_ins_count.get(mid, 0)
         formation_id = mod.get('formation_id')
-        scheduled_flag = False
         report['attempts'] += 1
+        scheduled_flag = False
 
-        suitable_rooms = [r for r in rooms if int(r.get('capacite') or 0) >= nb_ins]
+        # pick suitable rooms once
+        suitable_rooms = [r for r in rooms_by_capacity if r['capacite'] >= nb_ins]
         if not suitable_rooms:
-            suitable_rooms = sorted(rooms, key=lambda r: -int(r.get('capacite') or 0)) if rooms else []
+            suitable_rooms = sorted(rooms_by_capacity, key=lambda r: -r['capacite'])
 
-        duration = 120
-        # try to find duration from existing exams
-        ex = db_select("examens", "duree_minutes", eq={"module_id": mid}, limit=1)
-        if ex and ex[0].get('duree_minutes'):
-            try:
-                duration = int(ex[0].get('duree_minutes'))
-            except Exception:
-                pass
+        duration = module_default_duration.get(mid, 120)
 
-        for day in days:
-            if not students_free_on_date(mid, day):
+        studs = module_to_students.get(mid, [])
+
+        for d in days:
+            # check students free quickly (all in-memory)
+            conflict_found = False
+            for s in studs:
+                if d in student_busy_days.get(s, ()):
+                    conflict_found = True
+                    break
+            if conflict_found:
                 continue
 
+            # find free room for that day
             chosen_room = None
             for r in suitable_rooms:
-                if r.get('id') not in room_used_by_slot.get(day, set()):
+                if r['id'] not in room_used_day.get(d, set()):
                     chosen_room = r
                     break
-            if chosen_room is None:
+            if not chosen_room:
                 continue
 
-            chosen_prof = choose_prof_for_module(mid, formation_id)
+            # choose prof: try module_default_prof then dept then global least-loaded
+            chosen_prof = module_default_prof.get(mid)
+            if chosen_prof is None:
+                dept_id = formations.get(formation_id, {}).get('dept_id') if formation_id else None
+                if dept_id and profs_by_dept.get(dept_id):
+                    chosen_prof = min(profs_by_dept[dept_id], key=lambda p: sum(prof_count_day[p['id']].values()))['id']
+                elif profs:
+                    chosen_prof = min(profs, key=lambda p: sum(prof_count_day[p['id']].values()))['id']
+            # ensure prof daily limit (<3)
             if chosen_prof is None:
                 continue
-
-            if prof_exam_count_by_day[chosen_prof].get(day, 0) >= 3:
-                other_cands = [p for p in profs if prof_exam_count_by_day[p['id']].get(day, 0) < 3]
+            if prof_count_day[chosen_prof].get(d, 0) >= 3:
+                other_cands = [p for p in profs if prof_count_day[p['id']].get(d, 0) < 3]
                 if other_cands:
-                    chosen_prof = min(other_cands, key=lambda p: sum(prof_exam_count_by_day[p['id']].values()))['id']
+                    chosen_prof = min(other_cands, key=lambda p: sum(prof_count_day[p['id']].values()))['id']
                 else:
                     continue
 
-            dt = datetime.combine(day, dtime(hour=9, minute=0))
+            # schedule at fixed time 09:00 (prototype)
+            dt = datetime.combine(d, dtime(hour=9, minute=0))
             scheduled.append({
                 "module_id": mid,
                 "module_nom": mname,
@@ -500,13 +509,13 @@ def generate_timetable(start_date=None, end_date=None, force=False):
                 "nb_inscrits": nb_ins
             })
 
-            studs = module_to_students.get(mid, [])
+            # mark busy
             for s in studs:
-                student_exam_days[s].add(day)
-            prof_exam_count_by_day[chosen_prof][day] += 1
-            room_used_by_slot[day].add(chosen_room['id'])
-            scheduled_flag = True
+                student_busy_days[s].add(d)
+            prof_count_day[chosen_prof][d] += 1
+            room_used_day[d].add(chosen_room['id'])
             report['created_slots'] += 1
+            scheduled_flag = True
             break
 
         if not scheduled_flag:
@@ -516,9 +525,8 @@ def generate_timetable(start_date=None, end_date=None, force=False):
                 'nb_inscrits': nb_ins
             })
 
-    # persist if requested
+    # persistence (bulk)
     if force and scheduled:
-        # Create payload list
         payload = []
         for s in scheduled:
             payload.append({
@@ -531,14 +539,16 @@ def generate_timetable(start_date=None, end_date=None, force=False):
         res = db_insert("examens", payload)
         if res.get('error'):
             conflicts_report['insert_error'] = res.get('error')
+        else:
+            inserted = res.get('inserted_count', 0)
+            report['created_slots'] = inserted
 
-    # run conflict detection on DB state (best-effort)
+    # final conflicts check (best-effort)
     conflicts_after = detect_conflicts(start_date, end_date)
-
     duration = time.time() - tic
     report['duration_seconds'] = duration
     report['scheduled_count'] = len(scheduled)
-    report['scheduled_preview'] = scheduled[:50]
+    report['scheduled_preview_count'] = min(len(scheduled), 10)
     report['conflicts_post'] = {k: len(v) for k, v in conflicts_after.items()}
     for k, v in conflicts_after.items():
         conflicts_report[k] = v
@@ -1171,15 +1181,8 @@ elif st.session_state.step == "dashboard":
             show_table_safe(stats_form)
 
             st.markdown("### Conflits par formation (estimation)")
-            # build conflict per formation using detect_conflicts logic but limited
             conflicts = detect_conflicts()
-            # For simplicity map unscheduled or conflict counts to formation via modules
-            # Here we'll compute a simple heuristic: for each conflict in conflits_par_dept, show by formation 0 (placeholder)
-            # A more precise mapping would require mapping exam ids to modules to formations
-            # We'll show a placeholder if no detailed mapping is desired
-            # Build counts per formation (best-effort)
             formation_conflicts = defaultdict(int)
-            # try to use salles_capacite conflicts which contain examen_id
             for sc in conflicts.get('salles_capacite', []):
                 ex_id = sc.get('examen_id')
                 ex = db_get_one("examens", "*", eq={"id": ex_id})
@@ -1194,9 +1197,7 @@ elif st.session_state.step == "dashboard":
             show_table_safe(conflicts_by_form)
 
             st.markdown("### Validation des examens par formation")
-            # fetch exams for formations in dept that are not validated
             exams_dept = []
-            # get modules for dept's formations
             forms = db_select("formations", "id", eq={"dept_id": dept_id})
             form_ids = [f['id'] for f in forms]
             mods = []
@@ -1269,18 +1270,20 @@ elif st.session_state.step == "dashboard":
                     tic = time.time()
                     report, conflicts = generate_timetable(start_str, end_str, force=False)
                     duration = time.time() - tic
-                    st.success(f"✅ Génération (simulation) terminée en {duration:.1f} secondes !")
-                    st.json(report)
+                    # Concise summary only (no full JSON dump)
+                    st.success(f"✅ Génération (simulation) terminée en {duration:.1f} secondes — {report.get('created_slots',0)} créés (simulés).")
+                    st.write(f"- Tentatives : {report.get('attempts',0)}")
+                    st.write(f"- Créneaux prévus : {report.get('scheduled_count',0)}")
+                    if report.get('scheduled_count',0) > 0:
+                        st.info(f"Aperçu : {report.get('scheduled_preview_count',0)} créneaux (utilisez 'Persist schedule to DB (force)' pour écrire).")
+
+                    # Conflict summary compact
                     visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
-                    total_visible = sum(len(v) for v in visible_conflicts.values())
-                    if total_visible == 0:
-                        st.info("Aucun conflit affiché pour cette analyse.")
-                    else:
-                        st.warning(f"{total_visible} conflit(s) affiché(s).")
+                    if any(visible_conflicts.values()):
+                        st.warning("Conflits détectés (résumé) :")
                         for k, rows in visible_conflicts.items():
-                            if rows:
-                                with st.expander(f"{k} — {len(rows)} élément(s)"):
-                                    show_table_safe(rows)
+                            st.write(f"- {k.replace('_',' ')} : {len(rows)}")
+
                     # Provide an explicit "persist" option
                     if st.button("✅ Persist schedule to DB (force)"):
                         tic = time.time()
@@ -1290,7 +1293,8 @@ elif st.session_state.step == "dashboard":
                             st.success(f"Écriture en base terminée en {dt:.1f}s. {rep2.get('created_slots',0)} créés.")
                         else:
                             st.warning(f"Écriture : {conf2.get('insert_error', 'Aucune insertion effectuée ou erreur')}")
-                        st.json(rep2)
+                        st.write(f"- Tentatives : {rep2.get('attempts',0)}")
+                        st.write(f"- Créneaux insérés : {rep2.get('created_slots',0)}")
 
         with col_a2:
             if st.button("Optimiser les ressources"):
