@@ -595,90 +595,80 @@ for key, value in defaults.items():
         st.session_state[key] = value
 
 # ==================================================
-# PAGE 1 — LOGIN (CONTENEUR UNIQUE DÉGRADÉ)
+# PAGE 1 — LOGIN (PANNEAU FLOTTANT DANS FOND DÉGRADÉ)
 # ==================================================
 if st.session_state.step == "login":
 
-    # --- CSS POUR LE PANNEAU UNIQUE ---
+    # --- CSS CORRIGÉ ---
     st.markdown("""
         <style>
-        /* Fond de la page en noir */
+        /* 1. LE GRAND FOND (Toute la page) */
         .stApp {
-            background-color: #000000 !important;
+            background: linear-gradient(135deg, #1E3A8A 0%, #000000 100%) !important;
         }
 
-        /* LE CONTENEUR UNIQUE (Dégradé Bleu) */
-        div[data-testid="stVerticalBlock"] > div:has(div.main-panel) {
-            background: linear-gradient(135deg, #1E3A8A 0%, #111827 100%) !important;
-            padding: 50px !important;
-            border-radius: 30px !important;
-            box-shadow: 0px 15px 50px rgba(0, 133, 255, 0.3) !important;
+        /* 2. LE PETIT PANNEAU CENTRAL (La carte de login) */
+        div[data-testid="stVerticalBlock"] > div:has(div.login-card) {
+            background-color: rgba(17, 24, 39, 0.7) !important; /* Bleu très sombre transparent */
+            backdrop-filter: blur(10px); /* Effet flou moderne */
+            padding: 40px !important;
+            border-radius: 25px !important;
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
-            margin-top: 50px;
+            box-shadow: 0px 20px 50px rgba(0, 0, 0, 0.5) !important;
+            max-width: 500px;
+            margin: auto;
         }
 
-        /* Style des textes et titres */
-        .panel-title {
+        /* Titre et Labels */
+        .login-title {
             color: white;
             text-align: center;
-            font-size: 35px;
-            font-weight: 800;
+            font-size: 30px;
+            font-weight: bold;
             margin-bottom: 30px;
-            font-family: 'sans-serif';
         }
+        label { color: white !important; }
 
-        /* Inputs (Email/MDP) */
+        /* Champs de saisie */
         .stTextInput input {
-            background-color: rgba(255, 255, 255, 0.08) !important;
+            background-color: rgba(255, 255, 255, 0.05) !important;
             color: white !important;
             border: 1px solid rgba(255, 255, 255, 0.2) !important;
             border-radius: 12px !important;
-            height: 50px !important;
+        }
+
+        /* Boutons */
+        div.stButton > button {
+            border-radius: 12px !important;
+            font-weight: bold !important;
         }
         
-        /* Labels des inputs */
-        .stTextInput label {
-            color: rgba(255, 255, 255, 0.8) !important;
-            font-weight: bold !important;
-        }
-
-        /* BOUTON LOGIN (Bleu Clair) */
+        /* Bouton de connexion large */
         div.stButton > button[kind="primary"] {
             background-color: #0085FF !important;
-            color: white !important;
-            border: none !important;
-            border-radius: 12px !important;
-            height: 55px !important;
             width: 100% !important;
-            font-size: 18px !important;
-            font-weight: bold !important;
-            margin-top: 20px;
-        }
-
-        /* BOUTONS SECONDAIRES (Inscription / Oubli) */
-        div.stButton > button[kind="secondary"] {
-            background-color: rgba(255, 255, 255, 0.05) !important;
-            color: white !important;
-            border: 1px solid rgba(255, 255, 255, 0.1) !important;
-            border-radius: 10px !important;
-            width: 100% !important;
+            height: 50px;
         }
         </style>
     """, unsafe_allow_html=True)
 
     # --- MISE EN PAGE ---
-    _, col_center, _ = st.columns([0.6, 1, 0.6])
+    # On utilise des colonnes pour bien centrer le petit panneau au milieu
+    _, col_center, _ = st.columns([0.5, 1, 0.5])
 
     with col_center:
+        st.write("##") # Espace vertical pour descendre le panneau
+        
         with st.container():
-            # Marqueur pour le CSS
-            st.markdown('<div class="main-panel"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="panel-title">Connexion</div>', unsafe_allow_html=True)
+            # Le marqueur pour appliquer le style du petit panneau
+            st.markdown('<div class="login-card"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="login-title">Connexion</div>', unsafe_allow_html=True)
 
-            email = st.text_input("Adresse Email", placeholder="votre@email.com")
+            email = st.text_input("Email", placeholder="votre@email.com")
             password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
             
-            # Bouton principal
+            st.write(" ") # Petit espace
+            
             if st.button("Se connecter", type="primary"):
                 roles_tables = {
                     "Etudiant": "etudiants", "Professeur": "professeurs",
@@ -699,16 +689,17 @@ if st.session_state.step == "login":
                 if found_user:
                     st.rerun()
                 else:
-                    st.error("Email ou mot de passe incorrect")
+                    st.error("Identifiants incorrects")
 
-            # Espace et boutons du bas
-            st.write("##") 
+            st.markdown("<hr style='opacity: 0.1'>", unsafe_allow_html=True)
+            
+            # Boutons du bas bien alignés
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("🔑 MDP oublié ?", key="forgot_btn"):
-                    st.toast("Contactez l'administration.")
+                if st.button("MDP oublié ?", key="forgot"):
+                    st.toast("Contactez l'Admin.")
             with c2:
-                if st.button("📝 Inscription", key="signup_btn"):
+                if st.button("Créer un compte", key="signup"):
                     st.session_state.step = "signup"
                     st.rerun()
 # ==================================================
