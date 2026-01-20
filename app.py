@@ -930,7 +930,7 @@ elif st.session_state.step == "dashboard":
             except Exception as e:
                 st.info("aucun conflit détecté")
 
-    # --------------------
+# --------------------
 # Administrateur exams (service planification) : génération + optimisation + détection
 # --------------------
 elif role in ("Admin", "Administrateur examens"):
@@ -953,7 +953,7 @@ elif role in ("Admin", "Administrateur examens"):
     st.write("Actions disponibles :")
     col_a1, col_a2 = st.columns(2)
 
-    # Keys à cacher dans l’affichage
+    # keys to hide from display (user requested)
     excluded_keys = {'etudiants_1parjour', 'profs_3parjour', 'surveillances_par_prof', 'conflits_par_dept'}
 
     # --------------------
@@ -965,12 +965,11 @@ elif role in ("Admin", "Administrateur examens"):
                 st.error("Veuillez choisir une période valide (début ≤ fin).")
             else:
                 tic = time.time()
-                # La fonction doit être PostgreSQL-compatible
+                # PostgreSQL-compatible
                 report, conflicts = generate_timetable(cursor, conn, start_str, end_str, force=False)
                 duration = time.time() - tic
                 st.success(f"✅ Génération complète terminée en {duration:.1f} secondes !")
 
-                # Affichage uniquement des conflits visibles
                 visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
                 total_visible = sum(len(v) for v in visible_conflicts.values())
                 if total_visible == 0:
@@ -994,12 +993,11 @@ elif role in ("Admin", "Administrateur examens"):
                 report, conflicts = optimize_resources(cursor, conn, start_str, end_str)
                 duration = time.time() - tic
                 st.success(f"✅ Optimisation terminée en {report.get('duration_seconds', duration):.1f} secondes.")
-                
+
                 st.write("Améliorations estimées :")
                 for k, v in report.get('improvements', {}).items():
                     st.write(f"- {k.replace('_',' ')} : {v}")
-                
-                # Affichage uniquement des conflits visibles
+
                 visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
                 total_visible = sum(len(v) for v in visible_conflicts.values())
                 if total_visible == 0:
