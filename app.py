@@ -1349,63 +1349,6 @@ elif st.session_state.step == "dashboard":
                     if rows:
                         st.write(f"- {k.replace('_',' ')} : {len(rows)}")
 
-                    # Provide an explicit "persist" option
-                    if st.button("✅ Persist schedule to DB (force)"):
-                        tic = time.time()
-                        rep2, conf2 = generate_timetable(start_str, end_str, force=True)
-                        dt = time.time() - tic
-                        if rep2.get('created_slots', 0) > 0 and not conf2.get('insert_error'):
-                            st.success(f"Écriture en base terminée en {dt:.1f}s. {rep2.get('created_slots',0)} créés.")
-                        else:
-                            st.warning(f"Écriture : {conf2.get('insert_error', 'Aucune insertion effectuée ou erreur')}")
-                        st.write(f"- Tentatives : {rep2.get('attempts',0)}")
-                        st.write(f"- Créneaux insérés : {rep2.get('created_slots',0)}")
-
-        with col_a2:
-            if st.button("Optimiser les ressources"):
-                if start_str is None or end_str is None or start_str > end_str:
-                    st.error("Veuillez choisir une période valide (début ≤ fin).")
-                else:
-                    tic = time.time()
-                    report, conflicts = optimize_resources(start_str, end_str)
-                    duration = time.time() - tic
-                    st.success(f"✅ Optimisation terminée en {report.get('duration_seconds', duration):.1f} secondes.")
-                    st.write("Améliorations estimées :")
-                    for k, v in report.get('improvements', {}).items():
-                        st.write(f"- {k.replace('_',' ')} : {v}")
-                    st.markdown("Notes :")
-                    visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
-                    total_visible = sum(len(v) for v in visible_conflicts.values())
-                    if total_visible == 0:
-                        st.info("Aucun conflit affiché après optimisation.")
-                    else:
-                        st.warning(f"{total_visible} conflit(s) affiché(s) après optimisation.")
-                        for k, rows in visible_conflicts.items():
-                            if rows:
-                                with st.expander(f"{k} — {len(rows)} élément(s)"):
-                                    show_table_safe(rows)
-
-        # Add a dedicated "Détecter conflits" action (does not change other UI)
-        if st.button("Détecter conflits"):
-            if start_str is None or end_str is None or start_str > end_str:
-                st.error("Veuillez choisir une période valide (début ≤ fin).")
-            else:
-                tic = time.time()
-                conflicts = detect_conflicts(start_str, end_str)
-                duration = time.time() - tic
-                visible_conflicts = {k: v for k, v in conflicts.items() if k not in excluded_keys}
-                total_visible = sum(len(v) for v in visible_conflicts.values())
-                if total_visible == 0:
-                    st.success(f"✅ Analyse terminée en {duration:.1f} secondes — Aucun conflit affiché pour les catégories visibles.")
-                else:
-                    st.warning(f"⚠️ Analyse terminée en {duration:.1f} secondes — {total_visible} conflit(s) affiché(s).")
-                    st.markdown("**Résumé des conflits affichés**")
-                    for k, rows in visible_conflicts.items():
-                        st.write(f"- {k.replace('_',' ')} : {len(rows)}")
-                    for k, rows in visible_conflicts.items():
-                        if rows:
-                            with st.expander(f"Détails — {k}"):
-                                show_table_safe(rows)
 
     # --------------------
     # Vice-doyen / Doyen : Vue stratégique globale
