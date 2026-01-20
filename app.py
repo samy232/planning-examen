@@ -613,7 +613,7 @@ if st.session_state.step == "login":
         /* Style du conteneur visuel */
         [data-testid="stVerticalBlock"] > div:has(div.blue-panel) {
             background: linear-gradient(135deg, #1E3A8A 0%, #111827 100%);
-            padding: 40px !important;
+            padding: 20px !important;
             border-radius: 20px !important;
             box-shadow: 0px 10px 40px rgba(0, 133, 255, 0.4) !important;
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
