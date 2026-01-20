@@ -598,108 +598,116 @@ for key, value in defaults.items():
 # PAGE 1 — LOGIN + INSCRIPTION
 # ==================================================
 # ==================================================
-# PAGE 1 — LOGIN + INSCRIPTION (VERSION DARK & BLUE GRADIENT)
+# PAGE 1 — LOGIN + INSCRIPTION (FIXED INTERNAL PANEL)
 # ==================================================
 if st.session_state.step == "login":
 
     # --- CSS POUR LE DESIGN NOIR & BLEU GRADIENT ---
     st.markdown("""
         <style>
-        /* Fond de la page en noir classique */
+        /* Fond de la page en noir */
         .stApp {
             background-color: #000000 !important;
         }
 
-        /* Panneau central avec dégradé bleu et ombre */
-        .login-panel {
+        /* Style du conteneur visuel */
+        [data-testid="stVerticalBlock"] > div:has(div.blue-panel) {
             background: linear-gradient(135deg, #1E3A8A 0%, #111827 100%);
-            padding: 40px;
-            border-radius: 20px;
-            box-shadow: 0px 10px 30px rgba(0, 133, 255, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            text-align: center;
-            color: white;
+            padding: 40px !important;
+            border-radius: 20px !important;
+            box-shadow: 0px 10px 40px rgba(0, 133, 255, 0.4) !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
         }
 
-        /* Styliser les inputs pour qu'ils s'intègrent au bleu */
+        /* Titre blanc */
+        .login-title {
+            color: white;
+            text-align: center;
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+
+        /* Styliser les inputs */
         .stTextInput input {
             background-color: rgba(255, 255, 255, 0.1) !important;
             color: white !important;
             border: 1px solid rgba(255, 255, 255, 0.2) !important;
             border-radius: 10px !important;
         }
+        
+        /* Couleur des labels en blanc */
+        .stTextInput label {
+            color: white !important;
+        }
 
-        /* Bouton Login style CustomTkinter */
+        /* Bouton Login */
         div.stButton > button:first-child {
             background-color: #0085FF !important;
             color: white !important;
             border: none;
             border-radius: 10px;
-            height: 45px;
+            height: 48px;
             width: 100%;
             font-weight: bold;
-            margin-top: 10px;
+            margin-top: 15px;
         }
 
-        /* Boutons secondaires (MDP oublié / Inscription) */
-        div.stButton > button[kind="secondary"] {
-            background-color: transparent !important;
-            color: #60A5FA !important;
-            border: none !important;
-            text-decoration: underline;
-            font-size: 13px;
+        /* Liens secondaires */
+        .secondary-links {
+            text-align: center;
+            margin-top: 15px;
         }
         </style>
     """, unsafe_allow_html=True)
 
-    # --- CENTRAGE DU PANNEAU ---
+    # --- CENTRAGE ET CONTENU ---
     empty_l, col_center, empty_r = st.columns([1, 2, 1])
 
     with col_center:
-        st.write("#") # Espace vertical
-        st.write("#") 
+        st.write("#") # Espace pour centrer verticalement
         
-        st.markdown('<div class="login-panel">', unsafe_allow_html=True)
-        st.markdown("<h2 style='margin-bottom:20px;'>Connexion</h2>", unsafe_allow_html=True)
+        # On crée un conteneur spécial
+        with st.container():
+            # Cette div vide sert de "marqueur" pour le CSS ci-dessus
+            st.markdown('<div class="blue-panel"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="login-title">Connexion</div>', unsafe_allow_html=True)
 
-        # Champs de saisie
-        email = st.text_input("Email", placeholder="votre@email.com", label_visibility="collapsed")
-        password = st.text_input("Mot de passe", type="password", placeholder="Mot de passe", label_visibility="collapsed")
-        
-        # Bouton principal
-        if st.button("Se connecter"):
-            roles_tables = {
-                "Etudiant": "etudiants", "Professeur": "professeurs",
-                "Chef": "chefs_departement", "Admin": "administrateurs",
-                "Vice-doyen": "vice_doyens", "Administrateur examens": "administrateurs"
-            }
+            email = st.text_input("Email", placeholder="votre@email.com")
+            password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
+            
+            if st.button("Se connecter"):
+                roles_tables = {
+                    "Etudiant": "etudiants", "Professeur": "professeurs",
+                    "Chef": "chefs_departement", "Admin": "administrateurs",
+                    "Vice-doyen": "vice_doyens", "Administrateur examens": "administrateurs"
+                }
 
-            found_user = False
-            for role_name, table_name in roles_tables.items():
-                users = db_select(table_name, "*", eq={"email": email, "password": password})
-                if users:
-                    st.session_state.user_email = email
-                    st.session_state.role = role_name
-                    st.session_state.step = "dashboard"
-                    found_user = True
-                    break
+                found_user = False
+                for role_name, table_name in roles_tables.items():
+                    users = db_select(table_name, "*", eq={"email": email, "password": password})
+                    if users:
+                        st.session_state.user_email = email
+                        st.session_state.role = role_name
+                        st.session_state.step = "dashboard"
+                        found_user = True
+                        break
 
-            if found_user:
-                st.rerun()
-            else:
-                st.error("Identifiants incorrects")
+                if found_user:
+                    st.rerun()
+                else:
+                    st.error("Identifiants incorrects")
 
-        # Liens du bas (Mot de passe oublié & Inscription)
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Mot de passe oublié ?", key="forgot"):
-                st.info("Contactez l'Admin.")
-        with c2:
-            if st.button("Créer un compte", key="signup"):
-                st.session_state.step = "signup"
-                st.rerun()
-
-        st.markdown('</div>', unsafe_allow_html=True)
+            # Liens Inscription / MDP Oublié
+            st.write("---")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Mot de passe oublié ?", key="forgot"):
+                    st.toast("Contactez l'administrateur.")
+            with c2:
+                if st.button("Créer un compte", key="signup"):
+                    st.session_state.step = "signup"
+                    st.rerun()
 # ==================================================
 # PAGE 2 — CHOIX DU RÔLE
 # ==================================================
