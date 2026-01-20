@@ -1,5 +1,4 @@
 import streamlit as st
-import mysql.connector
 import random
 import string
 import smtplib
@@ -7,24 +6,29 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, date
 import time
+import psycopg2
 
 # ======================
 # CONFIG STREAMLIT
 # ======================
 st.set_page_config(page_title="Connexion EDT", layout="wide", initial_sidebar_state="collapsed")
 
-# ======================
-# CONNEXION MYSQL
-# ======================
-conn = mysql.connector.connect(
-    host=st.secrets["DB_HOST"],
-    port=st.secrets["DB_PORT"],
-    user=st.secrets["DB_USER"],
-    password=st.secrets["DB_PASS"],
-    database=st.secrets["DB_NAME"]
+
+# Supabase credentials
+DB_HOST = "ahxbpiyfrgquiyqcnpnq.supabase.co"
+DB_PORT = 5432
+DB_NAME = "postgres"
+DB_USER = "postgres"
+DB_PASSWORD = "RvXFOvvv1YZ6E257"
+
+# Connexion à la base
+conn = psycopg2.connect(
+    host=DB_HOST,
+    port=DB_PORT,
+    dbname=DB_NAME,
+    user=DB_USER,
+    password=DB_PASSWORD
 )
-
-
 cursor = conn.cursor(dictionary=True)
 
 tables_reset = ['etudiants','professeurs','chefs_departement','administrateurs','vice_doyens']
