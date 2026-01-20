@@ -638,7 +638,7 @@ if st.session_state.step == "login":
 
         /* ALL BUTTONS SAME STYLE */
         div.stButton > button {
-            width: 400px !important;        /* same width for all */
+            width: 500px !important;        /* same width for all */
             border-radius: 10px !important;
             height: 50px !important;        /* same height for all */
             font-weight: bold !important;
