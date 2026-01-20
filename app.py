@@ -611,133 +611,143 @@ def db_select(table, columns, eq=None):
 
 
 
-# Configuration de la page
-st.set_page_config(page_title="Test Login", layout="wide")
+import streamlit as st
 
-# Initialisation du step si nécessaire
+# --- CONFIGURATION INITIALE ---
 if "step" not in st.session_state:
     st.session_state.step = "login"
+if "user_email" not in st.session_state:
+    st.session_state.user_email = None
+if "role" not in st.session_state:
+    st.session_state.role = None
 
-# --- PAGE DE CONNEXION ---
+# ==================================================
+# PAGE 1 — LOGIN + INSCRIPTION
+# ==================================================
 if st.session_state.step == "login":
-    # --- CSS ULTIME POUR UN PANNEAU UNIQUE ---
+
+    # --- CSS : DESIGN NOIR & BLEU GRADIENT ---
     st.markdown("""
         <style>
-        /* 1. Fond d'écran noir total */
-        .stApp {
-            background-color: #000000 !important;
-        }
+        .stApp { background-color: #000000 !important; }
 
-        /* 2. Suppression forcée de TOUTES les boîtes grises de Streamlit */
-        [data-testid="stVerticalBlock"] > div {
-            background-color: transparent !important;
-            border: none !important;
-            box-shadow: none !important;
-        }
-        
-        /* 3. LE PANNEAU UNIQUE (Dégradé Bleu) */
-        [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"] {
-            background: linear-gradient(135deg, #1E3A8A 0%, #111827 100%) !important;
-            padding: 50px !important;
-            border-radius: 30px !important;
-            box-shadow: 0px 15px 50px rgba(0, 133, 255, 0.4) !important;
+        /* Conteneur Panneau Bleu */
+        [data-testid="stVerticalBlock"] > div:has(div.blue-panel) {
+            background: linear-gradient(135deg, #1E3A8A 0%, #111827 100%);
+            padding: 40px !important;
+            border-radius: 20px !important;
+            box-shadow: 0px 10px 40px rgba(0, 133, 255, 0.4) !important;
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
-            margin: auto;
-            max-width: 550px;
         }
 
-        /* Titre Blanc */
         .login-title {
             color: white;
             text-align: center;
-            font-size: 35px;
+            font-size: 32px;
             font-weight: bold;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
         }
 
-        /* Inputs stylisés */
         .stTextInput input {
-            background-color: rgba(255, 255, 255, 0.07) !important;
+            background-color: rgba(255, 255, 255, 0.1) !important;
             color: white !important;
             border: 1px solid rgba(255, 255, 255, 0.2) !important;
-            border-radius: 12px !important;
-            height: 45px !important;
+            border-radius: 10px !important;
         }
         
-        .stTextInput label {
-            color: white !important;
-            font-weight: 500 !important;
-        }
+        .stTextInput label { color: white !important; }
 
-        /* Bouton Login Bleu (Style que tu as aimé) */
-        div.stButton > button[kind="primary"] {
+        /* Bouton Principal (Login) */
+        div.stButton > button:first-child {
             background-color: #0085FF !important;
             color: white !important;
-            border: none !important;
-            border-radius: 12px !important;
-            height: 50px !important;
-            width: 100% !important;
-            font-weight: bold !important;
-            margin-top: 20px;
+            border: none;
+            border-radius: 10px;
+            height: 48px;
+            width: 100%;
+            font-weight: bold;
+            margin-top: 15px;
         }
-
-        /* Boutons secondaires */
+        
+        /* Boutons Secondaires (Inscription / Oubli) */
         div.stButton > button[kind="secondary"] {
             background-color: rgba(255, 255, 255, 0.05) !important;
             color: #60A5FA !important;
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
-            border-radius: 10px !important;
-            width: 100% !important;
         }
         </style>
     """, unsafe_allow_html=True)
 
     # --- MISE EN PAGE ---
-    _, col_center, _ = st.columns([0.5, 1, 0.5])
+    empty_l, col_center, empty_r = st.columns([1, 2, 1])
 
     with col_center:
+        st.write("#") 
+        
         with st.container():
+            st.markdown('<div class="blue-panel"></div>', unsafe_allow_html=True)
             st.markdown('<div class="login-title">Connexion</div>', unsafe_allow_html=True)
 
-            email = st.text_input("Adresse Email", placeholder="votre@email.com")
+            email = st.text_input("Email", placeholder="votre@email.com")
             password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
             
             # --- LOGIQUE DE CONNEXION ---
-            if st.button("Se connecter", type="primary"):
-                roles_tables = {
-                    "Etudiant": "etudiants", "Professeur": "professeurs",
-                    "Chef": "chefs_departement", "Admin": "administrateurs",
-                    "Vice-doyen": "vice_doyens", "Administrateur examens": "administrateurs"
-                }
+            if st.button("Se connecter"):
+                if email and password:
+                    roles_tables = {
+                        "Etudiant": "etudiants", "Professeur": "professeurs",
+                        "Chef": "chefs_departement", "Admin": "administrateurs",
+                        "Vice-doyen": "vice_doyens", "Administrateur examens": "administrateurs"
+                    }
 
-                found_user = False
-                for role_name, table_name in roles_tables.items():
-                    # Appel à ta fonction db_select de Supabase
-                    users = db_select(table_name, "*", eq={"email": email, "password": password})
-                    if users:
-                        st.session_state.user_email = email
-                        st.session_state.role = role_name
-                        st.session_state.step = "dashboard"
-                        found_user = True
-                        break
+                    found_user = False
+                    for role_name, table_name in roles_tables.items():
+                        # db_select doit être définie dans ton fichier principal
+                        users = db_select(table_name, "*", eq={"email": email, "password": password})
+                        if users:
+                            st.session_state.user_email = email
+                            st.session_state.role = role_name
+                            st.session_state.step = "dashboard"
+                            found_user = True
+                            break
 
-                if found_user:
-                    st.success(f"Bienvenue {st.session_state.role} !")
-                    st.rerun()
+                    if found_user:
+                        st.success("Connexion réussie !")
+                        st.rerun()
+                    else:
+                        st.error("Identifiants incorrects")
                 else:
-                    st.error("Email ou mot de passe incorrect")
+                    st.warning("Veuillez remplir tous les champs")
 
-            st.markdown("<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;'>", unsafe_allow_html=True)
-
-            # Boutons secondaires
+            st.markdown("<hr style='opacity:0.2'>", unsafe_allow_html=True)
+            
+            # --- LOGIQUE NAVIGATION ---
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("Mot de passe oublié ?", key="forgot"):
-                    st.toast("Contactez l'administrateur.")
+                    st.info("Contactez l'administrateur système.")
+            
             with c2:
+                # FIX : Ce bouton change l'étape et force le rafraîchissement
                 if st.button("Créer un compte", key="signup"):
-                    # Tu peux rediriger vers ta page d'inscription ici
-                    st.toast("Redirection vers l'inscription...")
+                    st.session_state.step = "signup"
+                    st.rerun()
+
+# ==================================================
+# PAGE D'INSCRIPTION (Même style)
+# ==================================================
+elif st.session_state.step == "signup":
+    st.markdown("<style>.stApp { background-color: #000000 !important; }</style>", unsafe_allow_html=True)
+    
+    _, col_reg, _ = st.columns([1, 2, 1])
+    with col_reg:
+        st.title("Inscription")
+        # Ajoute ici tes champs d'inscription (Nom, Prénom, etc.)
+        st.info("Formulaire d'inscription en cours de développement...")
+        
+        if st.button("Retour à la connexion"):
+            st.session_state.step = "login"
+            st.rerun()
 # ==================================================
 # PAGE 2 — CHOIX DU RÔLE
 # ==================================================
