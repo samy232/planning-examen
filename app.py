@@ -1311,14 +1311,7 @@ elif st.session_state.step == "dashboard":
             st.session_state.last_report = {}
         if "last_conflicts" not in st.session_state:
             st.session_state.last_conflicts = {}
-
         st.subheader("Génération & Optimisation des ressources")
-
-
-
-
-
-        
         # Sélection de période
         col_d1, col_d2 = st.columns(2)
         today = date.today()
@@ -1339,7 +1332,7 @@ elif st.session_state.step == "dashboard":
 
         with col_a1:
             st.write("### 📅 Planification")
-            if st.button("🔍 Lancer la simulation (Aperçu)", use_container_width=True):
+            if st.button("🔍 generation EDT", use_container_width=True):
                 if start_str > end_str:
                     st.error("La date de début doit être inférieure à la date de fin.")
                 else:
