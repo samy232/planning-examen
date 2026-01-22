@@ -645,7 +645,7 @@ if st.session_state.step == "login":
     with col_center:
         with st.container():
             st.markdown('<div class="blue-panel"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="login-title">📚 Connexion - Plateforme EDT</div>', unsafe_allow_html=True)
+            st.markdown('<div class="login-title">📚 Plateforme EDT</div>', unsafe_allow_html=True)
 
             email = st.text_input("Email", placeholder="votre@email.com")
             password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
