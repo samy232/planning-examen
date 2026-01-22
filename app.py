@@ -1314,6 +1314,64 @@ elif st.session_state.step == "dashboard":
 
         st.subheader("Génération & Optimisation des ressources")
 
+
+        # ==========================================================
+        # SECTION 1 : RECHERCHE & CONSULTATION (Nouveau)
+        # ==========================================================
+        with st.expander("🔍 Consultation rapide par Étudiant ou Salle", expanded=False):
+            c_search1, c_search2 = st.columns(2)
+            
+            # Récupération des données pour les filtres
+            etudiants_list = db_select("etudiants", "id, nom, prenom")
+            salles_list = db_select("lieu_examen", "id, nom")
+            
+            with c_search1:
+                # Création d'un dictionnaire pour mapper Nom -> ID
+                dict_etu = {f"{e['nom']} {e['prenom']}": e['id'] for e in etudiants_list}
+                choix_etu = st.selectbox("Rechercher un étudiant", ["Choisir..."] + list(dict_etu.keys()))
+            
+            with c_search2:
+                dict_salle = {s['nom']: s['id'] for s in salles_list}
+                choix_salle = st.selectbox("Voir l'occupation d'une salle", ["Toutes les salles"] + list(dict_salle.keys()))
+
+            if choix_etu != "Choisir...":
+                id_etu = dict_etu[choix_etu]
+                # Jointure logique via inscriptions
+                inscriptions = db_select("inscriptions", "module_id", eq={"etudiant_id": id_etu})
+                mod_ids = [i['module_id'] for i in inscriptions]
+                
+                # Filtrage des examens
+                all_ex = db_select("examens", "*")
+                etu_exams = [e for e in all_ex if e['module_id'] in mod_ids]
+                
+                if choix_salle != "Toutes les salles":
+                    id_salle = dict_salle[choix_salle]
+                    etu_exams = [e for e in etu_exams if e['salle_id'] == id_salle]
+                
+                if etu_exams:
+                    res_etu = []
+                    for ex in etu_exams:
+                        m = db_get_one("modules", "nom", eq={"id": ex['module_id']})
+                        s = db_get_one("lieu_examen", "nom", eq={"id": ex['salle_id']})
+                        res_etu.append({
+                            "Module": m.get('nom') if m else "-",
+                            "Salle": s.get('nom') if s else "-",
+                            "Date & Heure": ex.get('date_heure'),
+                            "Validé": "✅" if ex.get('validated') else "⏳"
+                        })
+                    st.dataframe(res_etu, use_container_width=True)
+                else:
+                    st.info(f"Aucun examen trouvé pour {choix_etu} avec ces critères.")
+
+        st.divider()
+
+
+
+
+
+
+
+        
         # Sélection de période
         col_d1, col_d2 = st.columns(2)
         today = date.today()
