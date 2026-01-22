@@ -1,6 +1,3 @@
-# Full app.py — Supabase-only backend (cursor/conn removed)
-# Rewritten to use supabase.table(...) for all DB access.
-# UI and app flow kept intact; DB layer replaced with helper functions that use Supabase.
 import streamlit as st
 import random
 import string
@@ -24,10 +21,6 @@ st.set_page_config(page_title="Connexion EDT", layout="wide", initial_sidebar_st
 SUPABASE_URL = st.secrets["supabase"]["url"]
 SUPABASE_KEY = st.secrets["supabase"]["key"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# Optional admin client (service_role key) for writes. Put your service_role key in secrets as:
-# [supabase]
-# service_role = "your_service_role_key_here"
 SERVICE_ROLE_KEY = st.secrets["supabase"].get("service_role") or st.secrets["supabase"].get("service_role_key")
 supabase_admin: Optional[Client] = None
 if SERVICE_ROLE_KEY:
@@ -36,10 +29,7 @@ if SERVICE_ROLE_KEY:
         print("[supabase_admin] service_role client created")
     except Exception as e:
         print("[supabase_admin] cannot create admin client:", e)
-
-# We removed cursor/conn mechanism — everything uses Supabase now.
-is_real_db = False  # kept for code paths that previously checked this flag
-
+is_real_db = False  
 tables_reset = ['etudiants','professeurs','chefs_departement','administrateurs','vice_doyens']
 
 # ======================
@@ -54,7 +44,6 @@ def db_select(table: str, select: str = "*", eq: Dict[str, Any] = None, order: O
             for k, v in eq.items():
                 q = q.eq(k, v)
         if order:
-            # order example: "column.asc" or "column.desc"
             parts = order.split(".")
             col = parts[0]
             asc = True
@@ -68,15 +57,12 @@ def db_select(table: str, select: str = "*", eq: Dict[str, Any] = None, order: O
         res = q.execute()
         return res.data or []
     except Exception as e:
-        # log to server console for debugging
         print(f"[db_select] error table={table} select={select} eq={eq} : {e}")
         return []
 
 def db_get_one(table: str, select: str = "*", eq: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
     rows = db_select(table, select=select, eq=eq, limit=1)
     return rows[0] if rows else None
-
-# --- REPLACED db_insert: uses admin client if available ---
 def db_insert(table: str, payload: Any) -> Dict[str, Any]:
     """Insert payload (dict or list) into table. Uses admin client if available for writes.
     Returns dict {data, error, inserted_count}.
@@ -91,8 +77,6 @@ def db_insert(table: str, payload: Any) -> Dict[str, Any]:
     except Exception as e:
         print(f"[db_insert] error table={table} payload_size={len(payload) if isinstance(payload, list) else 1} : {e}")
         return {"data": None, "error": str(e), "inserted_count": 0}
-# --- end replaced db_insert ---
-
 def db_update(table: str, values: Dict[str, Any], eq: Dict[str, Any]) -> Dict[str, Any]:
     """Update table set values where eq filters apply."""
     try:
@@ -157,7 +141,6 @@ def _parse_datetime(val):
     if val is None:
         return None
     if isinstance(val, str):
-        # Supabase may return ISO strings for timestamps
         try:
             return datetime.fromisoformat(val)
         except Exception:
@@ -434,13 +417,13 @@ def generate_timetable(start_date=None, end_date=None, force=False):
             except Exception:
                 pass
 
-    # trackers (use lightweight builtins)
+    # trackers 
     scheduled = []
-    student_busy_days = defaultdict(set)            # student_id -> set(date)
-    prof_count_day = defaultdict(lambda: defaultdict(int))  # prof_id -> {date:count}
-    room_used_day = defaultdict(set)                # date -> set(room_id)
-
-    # sort modules by descending number of students (largest scheduled first)
+    student_busy_days = defaultdict(set)            
+    prof_count_day = defaultdict(lambda: defaultdict(int)) 
+    room_used_day = defaultdict(set)               
+    
+    # sort modules by descending number of students 
     modules_sorted = sorted(modules, key=lambda m: -module_ins_count.get(m['id'], 0))
 
     for mod in modules_sorted:
@@ -461,7 +444,7 @@ def generate_timetable(start_date=None, end_date=None, force=False):
         studs = module_to_students.get(mid, [])
 
         for d in days:
-            # check students free quickly (all in-memory)
+            # check students free 
             conflict_found = False
             for s in studs:
                 if d in student_busy_days.get(s, ()):
@@ -479,7 +462,7 @@ def generate_timetable(start_date=None, end_date=None, force=False):
             if not chosen_room:
                 continue
 
-            # choose prof: try module_default_prof then dept then global least-loaded
+            # choose prof
             chosen_prof = module_default_prof.get(mid)
             if chosen_prof is None:
                 dept_id = formations.get(formation_id, {}).get('dept_id') if formation_id else None
@@ -497,7 +480,7 @@ def generate_timetable(start_date=None, end_date=None, force=False):
                 else:
                     continue
 
-            # schedule at fixed time 09:00 (prototype)
+            # schedule at fixed time 09:00 
             dt = datetime.combine(d, dtime(hour=9, minute=0))
             scheduled.append({
                 "module_id": mid,
@@ -525,7 +508,7 @@ def generate_timetable(start_date=None, end_date=None, force=False):
                 'nb_inscrits': nb_ins
             })
 
-    # persistence (bulk)
+    # persistence 
     if force and scheduled:
         payload = []
         for s in scheduled:
@@ -543,7 +526,7 @@ def generate_timetable(start_date=None, end_date=None, force=False):
             inserted = res.get('inserted_count', 0)
             report['created_slots'] = inserted
 
-    # final conflicts check (best-effort)
+    # final conflicts check
     conflicts_after = detect_conflicts(start_date, end_date)
     duration = time.time() - tic
     report['duration_seconds'] = duration
@@ -597,12 +580,13 @@ for key, value in defaults.items():
 
 
 
-# ==================================================
-# PAGE 1 — LOGIN + INSCRIPTION (DESIGN CHOISI)
-# ==================================================
+# ================================================================
+# PAGE 1 — LOGIN + INSCRIPTION 
+# ================================================================
+
 if st.session_state.step == "login":
 
-    # --- CSS POUR LE DESIGN NOIR & BLEU GRADIENT ---
+    # CSS POUR LE DESIGN BLEU GRADIENT 
     st.markdown("""
         <style>
         .stApp {
@@ -655,7 +639,7 @@ if st.session_state.step == "login":
         </style>
     """, unsafe_allow_html=True)
 
-    # --- PAGE LAYOUT ---
+    # PAGE LAYOUT
     empty_l, col_center, empty_r = st.columns([1, 2, 1])
 
     with col_center:
@@ -668,7 +652,7 @@ if st.session_state.step == "login":
 
             st.write("<div style='height:20px'></div>", unsafe_allow_html=True)
 
-            # -------- BOUTON PRINCIPAL --------
+            # BOUTON PRINCIPAL
             if st.button("Se connecter", type="primary"):
                 roles_tables = {
                     "Etudiant": "etudiants",
@@ -698,16 +682,14 @@ if st.session_state.step == "login":
                     st.rerun()
                 else:
                     st.error("Identifiants incorrects")
-
-            # -------- LIGNE BLANCHE --------
             st.markdown("<hr style='border:1px solid white;'>", unsafe_allow_html=True)
 
-            # -------- BOUTONS SECONDAIRES (SAME LEVEL) --------
+            # BOUTONS SECONDAIRES 
             if st.button("Mot de passe oublié ?", key="forgot"):
                 st.session_state.step = "forgot_email"
                 st.rerun()
 
-            st.write("")  # petit espace
+            st.write("") 
 
             if st.button("Nouvelle inscription", key="signup"):
                 st.session_state.step = "choose_role"
@@ -1207,31 +1189,17 @@ elif st.session_state.step == "dashboard":
             st.table(res)
         else:
             st.info("Aucune surveillance trouvée pour ces critères.")
-
-    
-######################
-    ###############
-    ############
-
-
-
-    
-    # --------------------
-    # Chef de département UI (Version Force-Refresh)
-    # --------------------
+    # --------------------------------------
+    # Chef de département UI 
+    # --------------------------------------
     elif role == "Chef":
         st.title("🧭 Dashboard — Chef de département")
-        
-        # 1. RÉCUPÉRATION DES DONNÉES EN UNE SEULE FOIS (SANS CACHE POUR TESTER)
-        # On récupère le profil
         user_prof = db_get_one("chefs_departement", "*", eq={"email": st.session_state.user_email})
         dept_id = user_prof.get('dept_id') if user_prof else None
 
         if not dept_id:
             st.error("Département non détecté dans la base 'chefs_departement'.")
         else:
-            # --- ÉTAPE A : CHARGEMENT ÉCLAIR ---
-            # On récupère tout le dictionnaire en 3 requêtes max
             all_forms = db_select("formations", "id, nom", eq={"dept_id": dept_id})
             f_map = {f['id']: f['nom'] for f in all_forms}
             f_ids = list(f_map.keys())
@@ -1250,7 +1218,7 @@ elif st.session_state.step == "dashboard":
             # Salles
             salle_map = {s['id']: s['nom'] for s in db_select("lieu_examen", "id, nom")}
 
-            # --- ÉTAPE B : STATISTIQUES MODERNES (GRAPHIQUE CIRCULAIRE) ---
+            # GRAPHIQUE CIRCULAIRE
             st.subheader("📊 Performance du Département")
             
             # Préparation des données pour le graphique
@@ -1266,12 +1234,12 @@ elif st.session_state.step == "dashboard":
             
             with col_b:
                 if stats_form:
-                    # Génération du diagramme circulaire (Pie/Donut Chart)
+                    # Génération du diagramme circulaire
                     fig = go.Figure(data=[go.Pie(
                         labels=list(stats_form.keys()), 
                         values=list(stats_form.values()), 
-                        hole=.4, # Crée l'effet "Donut" (cercle vide au centre)
-                        marker=dict(colors=['#636EFA', '#EF553B', '#00CC96', '#AB63FA']) # Jolies couleurs
+                        hole=.4, # Crée l'effet "Donut" 
+                        marker=dict(colors=['#636EFA', '#EF553B', '#00CC96', '#AB63FA']) # couleurs
                     )])
                     
                     fig.update_layout(
@@ -1283,7 +1251,7 @@ elif st.session_state.step == "dashboard":
                     
                     st.plotly_chart(fig, use_container_width=True)
 
-            # --- ÉTAPE C : CONFLITS PAR FORMATION ---
+            # CONFLITS PAR FORMATION
             st.subheader("⚠️ Conflits par Formation")
             all_conflicts = detect_conflicts()
             s_conf = all_conflicts.get('salles_capacite', [])
@@ -1307,7 +1275,7 @@ elif st.session_state.step == "dashboard":
 
             st.divider()
 
-            # --- ÉTAPE D : VALIDATION RÉELLE ET INSTANTANÉE ---
+            # VALIDATION
             st.subheader("📋 Liste des validations")
             if not pending_exams:
                 st.info("Tout est validé.")
@@ -1330,12 +1298,9 @@ elif st.session_state.step == "dashboard":
                             st.toast(f"Examen {m_nom} validé !")
                             st.rerun() # Recharge la page immédiatement
                     st.divider()
-    # --------------------
-    # Administrateur exams (service planification) : génération + optimisation + détection
-    # --------------------
- # --------------------
-    # Administrateur exams (service planification) : génération + optimisation + détection
-    # --------------------
+    # ----------------------------------------------------------------
+    # Administrateur exams  : génération + optimisation + détection
+    # ----------------------------------------------------------------
     elif role in ("Admin", "Administrateur examens"):
         st.title("🛠️ Service Planification — Administrateur examens")
         
@@ -1369,7 +1334,6 @@ elif st.session_state.step == "dashboard":
 
         with col_a1:
             st.write("### 📅 Planification")
-            # BOUTON 1 : SIMULATION
             if st.button("🔍 Lancer la simulation (Aperçu)", use_container_width=True):
                 if start_str > end_str:
                     st.error("La date de début doit être inférieure à la date de fin.")
@@ -1379,22 +1343,19 @@ elif st.session_state.step == "dashboard":
                         st.session_state.last_report = report
                         st.session_state.last_conflicts = conflicts
                         st.session_state.simulation_done = True
-            
-            # AFFICHAGE DES RÉSULTATS DE SIMULATION
             if st.session_state.simulation_done:
                 rep = st.session_state.last_report
                 conf = st.session_state.last_conflicts
                 
                 st.info(f"**Résultat simulation :** {rep.get('scheduled_count',0)} créneaux planifiables.")
                 
-                # BOUTON 2 : SAUVEGARDE RÉELLE (Ne disparaît plus au clic)
                 st.warning("⚠️ Ces données ne sont pas encore enregistrées.")
                 if st.button("✅ SAUVEGARDER DANS LA BASE", type="primary", use_container_width=True):
                     with st.spinner("Écriture dans Supabase..."):
                         final_rep, final_conf = generate_timetable(start_str, end_str, force=True)
                         if final_rep.get('created_slots', 0) > 0:
                             st.success(f"🚀 Succès ! {final_rep.get('created_slots',0)} examens enregistrés.")
-                            st.session_state.simulation_done = False # On reset après l'enregistrement
+                            st.session_state.simulation_done = False 
                         else:
                             st.error(f"Erreur lors de l'insertion : {final_conf.get('insert_error', 'Inconnue')}")
 
@@ -1424,7 +1385,6 @@ elif st.session_state.step == "dashboard":
                                 with st.expander(f"Détails : {k.replace('_',' ')} ({len(rows)})"):
                                     show_table_safe(rows)
 
-        # Zone d'affichage des détails de la simulation (si active)
         if st.session_state.simulation_done:
             st.divider()
             st.subheader("Détails de l'aperçu généré")
