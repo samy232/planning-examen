@@ -1445,7 +1445,7 @@ elif st.session_state.step == "dashboard":
                 cols[0].write(f"{m.get('nom') if m else '-'} — {ex.get('date_heure')}")
                 cols[1].write(f"Salle: {l.get('nom') if l else '-'}")
                 cols[2].write(f"Durée: {ex.get('duree_minutes')}min")
-                if cols[3].button(f"Valider final {ex['id']}", key=f"final_val_{ex['id']}"):
+                if cols[3].button(f"Valider final", key=f"final_val_{ex['id']}"):
                     res = db_update("examens", {"final_validated": 1}, {"id": ex['id']})
                     if res.get('error'):
                         st.error(f"Erreur final validation: {res['error']}")
