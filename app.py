@@ -1417,7 +1417,7 @@ elif st.session_state.step == "dashboard":
             st.success(f"✅ Calcul des KPIs terminé en {duration:.1f} secondes.")
             st.metric("Taux d'utilisation salles (30j) %", f"{kpis['taux_utilisation_salles_pct']}%")
             st.write(f"- Nombre séances sur {kpis['periode_days']} jours : {kpis['nb_seances']}")
-            st.write(f"- Total salles : {kpis['total_salles']}")
+            st.write(f"- Total salles : {kpis['total_salles']}0")
             st.write(f"- Conflit estimé ratio (%) : {kpis['conflit_estime_ratio_pct']}")
             st.markdown("Top profs (minutes surveillées):")
             show_table_safe(kpis['top_profs_minutes'])
