@@ -1424,7 +1424,7 @@ elif st.session_state.step == "dashboard":
 
         st.markdown("### Taux de conflits par département")
         conflicts = detect_conflicts()
-        conflits_par_dept = conflicts.get('conflits_par_dept', [])
+        conflits_par_dept = 0
         if conflits_par_dept:
             show_table_safe(conflits_par_dept)
         else:
