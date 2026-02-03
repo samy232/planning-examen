@@ -1425,12 +1425,7 @@ elif st.session_state.step == "dashboard":
         st.markdown("### Taux de conflits par département")
         st.info("Aucun conflit départemental estimé.")
 
-       # conflicts = detect_conflicts()
-        #conflits_par_dept = conflicts.get('conflits_par_dept', [])
-        if conflits_par_dept:
-            st.info("Aucun conflit départemental estimé.")
-        else:
-            st.info("Aucun conflit départemental estimé.")
+
 
         st.markdown("### Validation finale de l'EDT généré par l'admin")
         st.write("La validation finale permet d'officialiser l'emploi du temps généré par le service planification.")
