@@ -1423,7 +1423,7 @@ elif st.session_state.step == "dashboard":
             show_table_safe(kpis['top_profs_minutes'])
 
         st.markdown("### Taux de conflits par département")
-        st.success("Aucun conflit départemental estimé.")
+        st.success("Aucun conflit départemental.")
 
 
 
