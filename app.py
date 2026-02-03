@@ -1229,7 +1229,7 @@ elif st.session_state.step == "dashboard":
 
             col_a, col_b = st.columns([1, 2])
             with col_a:
-                st.metric("Total Examens", len(dept_exams))
+                st.metric("Total Examens pour departement d'informatique", len(dept_exams))
                 st.metric("À Valider", len(pending_exams), delta=len(pending_exams), delta_color="inverse")
             
             with col_b:
