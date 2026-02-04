@@ -328,7 +328,7 @@ def compute_kpis(start_date=None, end_date=None):
             else:
                 if dt < datetime.now() - timedelta(days=30):
                     continue
-            prof_minutes[pid] = 720
+            prof_minutes[pid] += dur
     top = []
     for p in profs:
         pid = p['id']
